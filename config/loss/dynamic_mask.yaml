@@ -1,0 +1,3 @@
+dynamic_mask:
+  weight: 0.1 # focal:1.0 ; 若动态物体面积小则需要更大权重0.5
+  mode: bce

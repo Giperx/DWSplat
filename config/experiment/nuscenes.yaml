@@ -1,0 +1,108 @@
+# @package _global_
+
+defaults:
+  - /dataset@_group_.nuscenes: nuscenes
+  - override /model/encoder: anysplat
+  - override /model/encoder/backbone: croco
+  - override /loss: [mse, lpips, depth_consis] # ablate: opacity loss
+
+wandb:
+  project: anysplat_0130
+  name: nuScenes_reTrain
+  tags: [nuScenes, 252x448]
+  mode: disabled # online offline disabled
+  
+model:
+  encoder:
+    gs_params_head_type: dpt_gs
+    pose_free: true
+    intrinsics_embed_loc: encoder
+    intrinsics_embed_type: token
+    pretrained_weights: ''
+    voxel_size: 0.0015
+    pred_pose: true
+    anchor_feat_dim: 128
+    gs_prune: false # ablate: opacity loss
+    pred_head_type: depth
+    freeze_backbone: true
+    # useVGGT: true # use vggt pretrained weights or anysplat pretrained weights
+    distill: true
+    frozenAggregator: true
+    frozenGaussianHead: false
+    useDGGTGaussianHead: false
+    frozenCameraHead: true
+    frozenDepthHead: true
+    render_conf: false
+    conf_threshold: 0.1
+    freeze_module: all
+    voxelize: true
+    intermediate_layer_idx: [4, 11, 17, 23]
+    
+dataset:
+  nuscenes:
+    input_image_shape: [252, 448]
+    view_sampler:
+      num_context_views: 3 # keep same with numTimes x 3
+      num_target_views: 3
+      # min_distance_between_context_views: 32
+      # max_distance_between_context_views: 256
+      max_img_per_gpu: 21
+    avg_pose: false
+    intr_augment: false
+    normalize_by_pts3d: false
+    rescale_to_1cube: false
+
+optimizer:
+  lr: 2.2e-5 # 9.3e-6 # 1.25e-5 # 6.25e-6 imgs:12x1 # 2.5e-5 imgs:6x8 # 3.125e-6 imgs:6x1 #1.25e-6 5e-5 #2e-4 and 24 per gpu, 16 gpus
+  warm_up_steps: 3000
+  backbone_lr_multiplier: 0.1 #0.1
+
+data_loader:
+  train:
+    batch_size: 4 # not used here
+    
+trainer:
+  max_steps: 60000
+  val_check_interval: 1500
+  num_nodes: 1
+  accumulate_grad_batches: 1
+  precision: bf16-mixed #"32"
+
+checkpointing:
+  # load: null
+  # load: anysplat_hfog_1108
+  load: /home/test/LIVA/XZP/FeedForward/fine_tune3/AnySplat_1218infer/finetune_weights/260129_singleFramesReTrainGSHeadEpoch2Iter25000/epoch_2-step_25000.ckpt # /home/test/LIVA/XZP/FeedForward/fine_tune3/AnySplat_1218infer/finetune_weights/260129_singleFramesReTrainGSHeadEpoch2Iter25000/weights
+  #  /home/test/LIVA/XZP/FeedForward/fine_tune3/AnySplat_1218infer/finetune_weights/260129_singleFramesReTrainGSHeadEpoch2Iter25000/epoch_2-step_25000.ckpt
+  #/home/test/LIVA/XZP/FeedForward/fine_tune3/AnySplat_1218infer/finetune_weights/260129_singleFramesReTrainGSHeadEpoch1Iter10000/epoch_1-step_10000.ckpt
+  # /home/test/LIVA/XZP/FeedForward/fine_tune3/AnySplat_1218infer/finetune_weights/260129_singleFramesReTrainGSHeadEpoch1Iter10000/weights #/home/test/LIVA/XZP/FeedForward/fine_tune3/AnySplat_1218infer/finetune_weights/260129_singleFramesReTrainGSHeadEpoch1Iter10000/epoch_1-step_10000.ckpt # anysplat_hfog_1108
+  log_save_dir: outputs/exp_onlyMutil_${wandb.name}/${now:%Y-%m-%d_%H-%M-%S}
+  flag_gaussian_head: false
+  every_n_train_steps: 5000
+  save_weights_only: false
+  save_top_k: 100
+  
+train:
+  pose_loss_alpha: 1.0
+  pose_loss_delta: 1.0
+  cxt_depth_weight: 0.0
+  weight_pose: 10.0 #10.0
+  weight_depth: 1.0 #1.0 # 1.0
+  weight_normal: 0.0
+
+hydra:
+  run:
+    dir: outputs/exp_onlyMutil_${wandb.name}/${now:%Y-%m-%d_%H-%M-%S}
+
+loss:
+  mse:
+    weight: 1.0
+    conf: false
+    loss_type: mse
+  lpips:
+    weight: 0.05
+    conf: false
+  depth_consis:
+    weight: 0.1 # 
+    loss_type: MSE
+
+
