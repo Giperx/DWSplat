@@ -6,6 +6,7 @@ name: nuscenes
 roots: [datasets/nuscenes/processed_10Hz/trainval2]
 split_file_path: nuScenes_Train.txt
 numTimes: 1  # total number of timesteps in each scene
+injuecPose: true  # Whether to GT poses into Omni-VGGT
 
 input_image_shape: [252, 448] # not used here
 original_image_shape: [900, 1600] # 252x448

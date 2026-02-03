@@ -18,6 +18,8 @@ from .shims.crop_shim import apply_crop_shim
 from .types import Stage
 from .view_sampler import ViewSampler
 
+from ..model.encoder.vggt.utils.geometry import closed_form_inverse_se3
+
 logger = logging.getLogger(__name__)
 
 
@@ -40,6 +42,7 @@ class DatasetNuScenesCfg(DatasetCfgCommon):
     intr_augment: bool
     normalize_by_pts3d: bool
     numTimes: int = 1  # Number of consecutive timestamps to load
+    injuecPose: bool = False  # Whether to GT poses into Omni-VGGT
 
 
 @dataclass
@@ -68,8 +71,8 @@ class DatasetNuScenes(Dataset):
     
     # Target size for resizing
     # TARGET_SIZE = 224  # 224 336 448
-    TARGET_HEIGHT = 252
-    TARGET_WIDTH = 448
+    TARGET_HEIGHT = 294 #252
+    TARGET_WIDTH = 518 #448
     
     # Camera mapping based on file naming convention {timestep}_{cam_id}.jpg
     # 0: CAM_FRONT
@@ -266,7 +269,7 @@ class DatasetNuScenes(Dataset):
         # if self.cfg.input_image_shape[0] == self.TARGET_SIZE and self.cfg.input_image_shape[1] == self.TARGET_SIZE:
         #     image = image.resize((self.TARGET_SIZE, self.TARGET_SIZE), Image.BILINEAR) # BICUBIC
         if self.cfg.input_image_shape[0] == self.TARGET_HEIGHT and self.cfg.input_image_shape[1] == self.TARGET_WIDTH:
-            image = image.resize((self.TARGET_WIDTH, self.TARGET_HEIGHT), Image.BILINEAR)
+            image = image.resize((self.TARGET_WIDTH, self.TARGET_HEIGHT), Image.BICUBIC)
             
         return self.to_tensor(image)
 
@@ -331,6 +334,16 @@ class DatasetNuScenes(Dataset):
         masks = []
         extrinsics = []
         intrinsics = []
+        depthmaps_omnivggt = []
+        masks_omnivggt = []
+        depth_indices = [] # 暂时没用，没有使用到depth map
+        camera_indices = []
+        
+        if self.cfg.injuecPose:
+            # logger.info("Injecing GT Poses into Omni-VGGT!")
+            for t_idx in enumerate(3 * timesteps):
+                camera_indices.append(cam_ids)
+            
         
         # Pre-read intrinsics (constant per cam)
         cam_intrinsics_map = {}
@@ -355,12 +368,23 @@ class DatasetNuScenes(Dataset):
                     # Intrinsics
                     intr = cam_intrinsics_map[cid].copy()
                     intrinsics.append(intr)
+                    
+                    ### add for omni-vggt
+                    # depthmap = np.zeros((final_height, new_width), dtype=np.float32)
+                    # mask = np.zeros_like(depthmap, dtype=bool)
+                    
+                    depthmap_tensor_omnivggt = torch.zeros((self.TARGET_HEIGHT, self.TARGET_WIDTH), dtype=torch.float32)
+                    mask_tensor_omnivggt = torch.zeros((self.TARGET_HEIGHT, self.TARGET_WIDTH), dtype=torch.bool)
+                    depthmaps_omnivggt.append(depthmap_tensor_omnivggt)
+                    masks_omnivggt.append(mask_tensor_omnivggt)
 
             # Stack everything
             images = torch.stack(images) # (N_views, 3, H, W)
             masks = torch.stack(masks)   # (N_views, 1, H, W)
             extrinsics = torch.from_numpy(np.stack(extrinsics)) # (N_views, 4, 4)
             intrinsics = torch.from_numpy(np.stack(intrinsics)) # (N_views, 3, 3)
+            depthmaps_omnivggt = torch.stack(depthmaps_omnivggt) # (N_views, H, W)
+            masks_omnivggt = torch.stack(masks_omnivggt) # (N_views, H, W)
 
             # Determine original image size for normalization
             # The provided intrinsics are based on original image size (likely)
@@ -450,6 +474,8 @@ class DatasetNuScenes(Dataset):
                     scale *= max_pos # Track total scaling if needed for depth
 
             # --- Construct Output ---
+            ### for omnivggt inverse extrinsics
+            extrinsics = closed_form_inverse_se3(extrinsics[None])[0][:3]
             
             def build_subset(indices):
                 return {
@@ -461,6 +487,10 @@ class DatasetNuScenes(Dataset):
                     "near": self.get_bound("near", len(indices)) / scale,
                     "far": self.get_bound("far", len(indices)) / scale,
                     "index": indices,
+                    "depth_omnivggt": depthmaps_omnivggt[indices], # --- add for omni-vggt
+                    "mask_omnivggt": masks_omnivggt[indices],
+                    "camera_indices": camera_indices, # --- add for omni-vggt
+                    "depth_indices": depth_indices, # --- add for omni-vggt
                 }
 
             scene_id = scene_id + f"_ts{timesteps[0]:03d}_grp{'F' if use_front_group else 'B'}"
