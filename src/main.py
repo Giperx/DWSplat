@@ -116,7 +116,7 @@ def train(cfg_dict: DictConfig):
     trainer = Trainer(
         max_epochs=-1,
         num_nodes=cfg.trainer.num_nodes,
-        num_sanity_val_steps=-1, # -1 means val all at the beginning
+        # num_sanity_val_steps=-1, # -1 means val all at the beginning
         accelerator="gpu",
         logger=logger,
         devices="auto",
@@ -166,7 +166,7 @@ def train(cfg_dict: DictConfig):
         # 不传递 checkpoint_path 给 trainer，因为它是个目录
         checkpoint_path_for_lightning = None
         
-    model_wrapper.model.encoder.usePreTrainedWeights()
+    model_wrapper.model.encoder.usePreTrainedWeights(False)
 
     data_module = DataModule(
         cfg.dataset,

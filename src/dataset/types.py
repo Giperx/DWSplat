@@ -21,6 +21,11 @@ class BatchedViews(TypedDict, total=False):
     far: Float[Tensor, "batch _"]  # batch view
     index: Int64[Tensor, "batch _"]  # batch view
     overlap: Float[Tensor, "batch _"]  # batch view
+    # fine_dynamic_masks: Float[Tensor, "batch _ _ _ _"]  # batch view height width
+    # depth: Float[Tensor, "batch _ _ _"]  # batch view height width
+    # mask_omnivggt: Float[Tensor, "batch _ _ _"]  # batch view height width
+    # camera_indices: Int64[Tensor, "batch _"]  # batch view
+    # depth_indices: Int64[Tensor, "batch _"]  # batch view
 
 
 class BatchedExample(TypedDict, total=False):

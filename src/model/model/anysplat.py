@@ -11,7 +11,7 @@ import torch.nn as nn
 import numpy as np
 import torch.nn.functional as F
 from dataclasses import dataclass
-
+from src.dataset.types import BatchedExample
 from src.model.encoder.common.gaussian_adapter import GaussianAdapterCfg
 from src.model.decoder.decoder_splatting_cuda import DecoderSplattingCUDA, DecoderSplattingCUDACfg
 from src.model.encoder.anysplat import EncoderAnySplat, EncoderAnySplatCfg, OpacityMappingCfg
@@ -103,7 +103,7 @@ class AnySplat(nn.Module, huggingface_hub.PyTorchModelHubMixin):
         return gaussians, pred_context_pose
     
     def forward(self, 
-        context_image: torch.Tensor,
+        batch: BatchedExample,
         global_step: int = 0,
         visualization_dump: Optional[dict] = None,
         near: float = 0.01,
@@ -112,9 +112,11 @@ class AnySplat(nn.Module, huggingface_hub.PyTorchModelHubMixin):
         new_width: Optional[int] = None,
         # current_timeFrame_flag: bool = True
     ):
-        b, v, c, h, w = context_image.shape
-        device = context_image.device
-        encoder_output = self.encoder(context_image, global_step, visualization_dump=visualization_dump)
+        # print(batch["context"]["image"].shape) torch.Size([b, 3, 3, 294, 518])
+        b, v, c, h, w = batch["context"]["image"].shape
+        # b, v, c, h, w = context_image.shape
+        device = batch["context"]["image"].device
+        encoder_output = self.encoder(batch, global_step, visualization_dump=visualization_dump)
         gaussians, pred_context_pose = encoder_output.gaussians, encoder_output.pred_context_pose
         
         if wide_fov and new_width is not None:

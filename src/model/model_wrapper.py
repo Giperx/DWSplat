@@ -198,7 +198,7 @@ class ModelWrapper(LightningModule):
         # Run the model.
         visualization_dump = None
 
-        encoder_output, output = self.model(context_image, self.global_step, visualization_dump=visualization_dump)
+        encoder_output, output = self.model(batch, self.global_step, visualization_dump=visualization_dump)
         gaussians, pred_pose_enc_list, depth_dict = encoder_output.gaussians, encoder_output.pred_pose_enc_list, encoder_output.depth_dict
         pred_context_pose = encoder_output.pred_context_pose
         infos = encoder_output.infos
@@ -268,7 +268,7 @@ class ModelWrapper(LightningModule):
         # print(f"total_loss: {total_loss}")
 
         # Skip batch if loss is too high after certain step
-        SKIP_AFTER_STEP = 5000  
+        SKIP_AFTER_STEP = 1000  
         LOSS_THRESHOLD = 0.2
         if self.global_step > SKIP_AFTER_STEP and total_loss > LOSS_THRESHOLD:
             print(f"Skipping batch with high loss ({total_loss:.6f}) at step {self.global_step} on Rank {self.global_rank}")
@@ -477,7 +477,7 @@ class ModelWrapper(LightningModule):
         assert b == 1
         visualization_dump = {}
 
-        encoder_output, output = self.model((batch["context"]["image"] + 1) / 2, self.global_step, visualization_dump=visualization_dump)
+        encoder_output, output = self.model(batch, self.global_step, visualization_dump=visualization_dump)
         gaussians, pred_pose_enc_list, depth_dict = encoder_output.gaussians, encoder_output.pred_pose_enc_list, encoder_output.depth_dict
         pred_context_pose, distill_infos = encoder_output.pred_context_pose, encoder_output.distill_infos
         infos = encoder_output.infos
@@ -569,7 +569,8 @@ class ModelWrapper(LightningModule):
         ).squeeze(0)
         
         self.logger.log_image(
-            f"images/{batch['scene'][0]}_b{batch_idx}",
+            # f"images/{batch['scene'][0]}_b{batch_idx}",
+            f"images/{batch['scene'][0]}",
             [prep_image(add_border(comparison))],
             step=self.global_step,
             caption=batch["scene"],
@@ -606,7 +607,7 @@ class ModelWrapper(LightningModule):
 
 
         ### add 验证时就可以输出宽视野图像
-        _, output_wide = self.model((batch["context"]["image"] + 1) / 2, self.global_step, visualization_dump=visualization_dump, wide_fov=True, new_width=896) # 1.7*448=761
+        _, output_wide = self.model(batch, self.global_step, visualization_dump=visualization_dump, wide_fov=True, new_width=1036) 
         rgb_pred_wide = output_wide.color[0].float()
         # depth_pred_wide = vis_depth_map(output_wide.depth[0])
         # render_normal_wide = (get_normal_map(output_wide.depth.flatten(0, 1), batch["context"]["intrinsics"].flatten(0, 1)).permute(0, 3, 1, 2) + 1) / 2.
@@ -643,7 +644,7 @@ class ModelWrapper(LightningModule):
         ).squeeze(0)
         
         self.logger.log_image(
-            f"wide_images/wide_{batch['scene'][0]}_{batch_idx}",
+            f"wide_images/wide_{batch['scene'][0]}",
             [prep_image(add_border(comparison_wide))],
             step=self.global_step,
             caption=batch["scene"],

@@ -339,10 +339,19 @@ class DatasetNuScenes(Dataset):
         depth_indices = [] # 暂时没用，没有使用到depth map
         camera_indices = []
         
-        if self.cfg.injuecPose:
-            # logger.info("Injecing GT Poses into Omni-VGGT!")
-            for t_idx in enumerate(3 * timesteps):
-                camera_indices.append(cam_ids)
+        # 先别用 list，直接准备 per-view 的 tensor（稍后知道 V 也行）
+        # 这里在确定 timesteps / cam_ids 后就能确定 V
+        V = len(timesteps) * len(cam_ids)  # = 3 * numTimes
+
+        # camera_indices: 每个时间戳三路相机固定为 0,1,2（按 cam_ids 的顺序）
+        camera_indices = torch.tensor(
+            [i for _ in timesteps for i in range(len(cam_ids))],
+            dtype=torch.int64,
+        )  # shape: (V,)
+
+        # depth_indices: 你不使用 depth，就给占位 -1
+        depth_indices = torch.full((V,), -1, dtype=torch.int64)  # shape: (V,)
+
             
         
         # Pre-read intrinsics (constant per cam)
@@ -375,6 +384,9 @@ class DatasetNuScenes(Dataset):
                     
                     depthmap_tensor_omnivggt = torch.zeros((self.TARGET_HEIGHT, self.TARGET_WIDTH), dtype=torch.float32)
                     mask_tensor_omnivggt = torch.zeros((self.TARGET_HEIGHT, self.TARGET_WIDTH), dtype=torch.bool)
+                    ### debug print shape
+                    # print(f"Depthmap shape: {depthmap_tensor_omnivggt.shape}, Mask shape: {mask_tensor_omnivggt.shape}")
+                    # Depthmap shape: torch.Size([294, 518]), Mask shape: torch.Size([294, 518])
                     depthmaps_omnivggt.append(depthmap_tensor_omnivggt)
                     masks_omnivggt.append(mask_tensor_omnivggt)
 
@@ -475,7 +487,9 @@ class DatasetNuScenes(Dataset):
 
             # --- Construct Output ---
             ### for omnivggt inverse extrinsics
-            extrinsics = closed_form_inverse_se3(extrinsics[None])[0][:3]
+            # print("********** Debug: before inverse extrinsics shape:", extrinsics.shape) #torch.Size([3, 4, 4])
+            extrinsics = closed_form_inverse_se3(extrinsics)[:, :3, :]
+            # print("********** Debug: after inverse extrinsics shape:", extrinsics.shape) #torch.Size([3, 3, 4])
             
             def build_subset(indices):
                 return {
@@ -483,14 +497,14 @@ class DatasetNuScenes(Dataset):
                     "intrinsics": normalized_intrinsics[indices],
                     "image": images[indices],
                     "fine_dynamic_masks": masks[indices], # Added field
-                    "depth": torch.zeros_like(images[indices])[:, 0], # Placeholder depth
+                    # "depth": torch.zeros_like(images[indices])[:, 0], # Placeholder depth
                     "near": self.get_bound("near", len(indices)) / scale,
                     "far": self.get_bound("far", len(indices)) / scale,
                     "index": indices,
-                    "depth_omnivggt": depthmaps_omnivggt[indices], # --- add for omni-vggt
+                    "depth": depthmaps_omnivggt[indices], # --- add for omni-vggt
                     "mask_omnivggt": masks_omnivggt[indices],
-                    "camera_indices": camera_indices, # --- add for omni-vggt
-                    "depth_indices": depth_indices, # --- add for omni-vggt
+                    "camera_indices": camera_indices[indices],
+                    "depth_indices": depth_indices[indices],
                 }
 
             scene_id = scene_id + f"_ts{timesteps[0]:03d}_grp{'F' if use_front_group else 'B'}"
@@ -509,7 +523,7 @@ class DatasetNuScenes(Dataset):
             # 占位符 3D 点和掩码
             context_valid_mask = torch.ones_like(example["context"]["image"])[:, 0].bool()
             
-            target_valid_mask = torch.ones_like(example["context"]["image"])[:, 0].bool()
+            target_valid_mask = torch.ones_like(example["target"]["image"])[:, 0].bool()
             
             example["context"]["valid_mask"] = context_valid_mask * 0 # 返回后续使用时，有batch维度，b v h w
             example["target"]["valid_mask"] = target_valid_mask * 0
