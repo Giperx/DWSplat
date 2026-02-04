@@ -21,3 +21,5 @@ now：现在输入depth_indices, camera_indices先作为tensor，在ZeroAggregat
 
 为了适配Gaussian Head需要DINO特征，进一步修改ZeroAggregator部分。额外输出DINO concat后的特征。
 
+
+tar -czvf DWSplat0203.tar.gz --exclude=./DWSplat_0202/anysplat_hfog_1108 --exclude=./DWSplat_0202/datasets --exclude=./DWSplat_0202/outputs --exclude=./DWSplat_0202/.git --exclude=./DWSplat_0202/.vscode ./DWSplat_0202

@@ -14,7 +14,8 @@ cd DWSplat
 conda create -y -n dwsplat python=3.10
 conda activate dwsplat
 pip install torch==2.2.0 torchvision==0.17.0 torchaudio==2.2.0 --index-url https://download.pytorch.org/whl/cu121
-pip install -r requirements.txt
+pip install -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+pip install trimesh onnxruntime-gpu==1.17.1 viser==0.2.23 evo -i https://pypi.tuna.tsinghua.edu.cn/simple
 ```
 
 
