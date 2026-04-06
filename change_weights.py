@@ -72,5 +72,5 @@ if __name__ == "__main__":
 
 # cat epoch_0-step_17000.part.* > epoch_0-step_17000.tar.gz
 # 260129_singleFramesReTrainGSHeadEpoch1Iter10000  260129_singleFramesReTrainGSHeadEpoch2Iter25000
-# CUDA_VISIBLE_DEVICES=0 python change_weights.py +experiment=nuscenes +output_path=/home/test/LIVA/XZP/FeedForward/fine_tune3/AnySplat_1218infer/finetune_weights/260129_singleFramesReTrainGSHeadEpoch2Iter25000/weights checkpointing.load=/home/test/LIVA/XZP/FeedForward/fine_tune3/AnySplat_1218infer/finetune_weights/260129_singleFramesReTrainGSHeadEpoch2Iter25000/epoch_1-step_10000.ckpt
+# CUDA_VISIBLE_DEVICES=1 python change_weights.py +experiment=nuscenes +output_path=/home/test/LIVA/XZP/FeedForward/fine_tune4/DWSplat_0202/Weights/260203SingleFramesVol0002Epoch3Iter20000/weights checkpointing.load=/home/test/LIVA/XZP/FeedForward/fine_tune4/DWSplat_0202/Weights/260203SingleFramesVol0002Epoch3Iter20000/epoch_3-step_20000.ckpt
 

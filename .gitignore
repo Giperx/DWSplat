@@ -198,5 +198,16 @@ src/model/encoder/anysplat_back260105.py
 anysplat_hfog_1108
 src/model/encoder/anysplat_back260109.py
 batchInferNuScenesFusionMixed260202.py
-batchCalcuMetricsNuScenesFusion260128.py
+batchCalcuMetricsSuccessNuScenes260202.py
 change_OGCode0128.md
+README.md
+BatchInferDWSplatNuScenes260205.py
+Weights/*
+renders_val_omni/*
+bf16_BatchInferDWSplatNuScenes260205.py
+nuScenes_Val2.txt
+InferDWSplatNuScenesShift260309.py
+renders_val_omni_shift/*
+Weights/*
+nuScenes_Val2.txt
+requirements.txt

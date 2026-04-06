@@ -10,7 +10,7 @@ wandb:
   project: anysplat_0203
   name: nuScenes_reTrain
   tags: [nuScenes, 294x518]
-  mode: online # online offline disabled
+  mode: disabled # online offline disabled
   
 model:
   encoder:
@@ -19,7 +19,7 @@ model:
     intrinsics_embed_loc: encoder
     intrinsics_embed_type: token
     pretrained_weights: ''
-    voxel_size: 0.001
+    voxel_size: 0.002
     pred_pose: true
     anchor_feat_dim: 128
     gs_prune: false # ablate: opacity loss
@@ -62,14 +62,15 @@ data_loader:
     batch_size: 4 # not used here
     
 trainer:
-  max_steps: 60000
+  max_steps: 120000
   val_check_interval: 1500
   num_nodes: 1
   accumulate_grad_batches: 1
   precision: "32" #"32" bf16-mixed
 
 checkpointing:
-  load: null
+  # load: null
+  load: /home/test/LIVA/XZP/FeedForward/fine_tune4/DWSplat_0202/outputs/exp_OmniVGGT_nuScenes_reTrain/2026-02-03_22-25-05/checkpoints/epoch_2-step_60000.ckpt
   log_save_dir: outputs/exp_OmniVGGT_${wandb.name}/${now:%Y-%m-%d_%H-%M-%S}
   flag_gaussian_head: false
   every_n_train_steps: 5000

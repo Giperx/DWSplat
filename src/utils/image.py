@@ -208,6 +208,6 @@ def process_image_nuscenes(img_path):
     
     # 插值到448x252
     # img = img.resize((448, 252), Image.BICUBIC)
-    img = img.resize((448, 252), Image.BILINEAR)
+    img = img.resize((518, 294), Image.BICUBIC)
     img_tensor = torchvision.transforms.ToTensor()(img) * 2.0 - 1.0 # [-1, 1]
     return img_tensor

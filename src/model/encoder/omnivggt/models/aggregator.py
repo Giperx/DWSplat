@@ -10,7 +10,7 @@ import torch.nn as nn
 from typing import Tuple, List
 import random
 import numpy as np
-
+from pathlib import Path
 from src.model.encoder.omnivggt.layers import PatchEmbed
 from src.model.encoder.omnivggt.layers.block import Block
 from src.model.encoder.omnivggt.layers.rope import RotaryPositionEmbedding2D, PositionGetter
@@ -188,15 +188,37 @@ class Aggregator(nn.Module):
             # if hasattr(self.patch_embed, "mask_token"):
             #     self.patch_embed.mask_token.requires_grad_(False)
             
+            # if patch_embed == "dinov2_vitl14_reg":
+            #     # dinov2_pretrained = torch.hub.load('facebookresearch/dinov2', 'dinov2_vitl14_reg')
+            #     dinov2_pretrained = torch.hub.load(
+            #         repo_or_dir='~/.cache/torch/hub/facebookresearch_dinov2_main',  # 本地仓库路径
+            #         model='dinov2_vitl14_reg',
+            #         source='local'  # 强制使用本地仓库
+            #     )
+            #     self.patch_embed.load_state_dict(dinov2_pretrained.state_dict(), strict=False)
             if patch_embed == "dinov2_vitl14_reg":
-                # dinov2_pretrained = torch.hub.load('facebookresearch/dinov2', 'dinov2_vitl14_reg')
-                dinov2_pretrained = torch.hub.load(
-                    repo_or_dir='/home/test/.cache/torch/hub/facebookresearch_dinov2_main',  # 本地仓库路径
-                    model='dinov2_vitl14_reg',
-                    source='local'  # 强制使用本地仓库
-                )
-                self.patch_embed.load_state_dict(dinov2_pretrained.state_dict(), strict=False)
+                # 1. 尝试从本地缓存加载（自动展开 ～）
+                local_hub_dir = Path.home() / ".cache" / "torch" / "hub" / "facebookresearch_dinov2_main"
                 
+                if local_hub_dir.exists():
+                    try:
+                        print(f"Loading DINOv2 from local cache: {local_hub_dir}")
+                        dinov2_pretrained = torch.hub.load(
+                            repo_or_dir=str(local_hub_dir),
+                            model='dinov2_vitl14_reg',
+                            source='local'
+                        )
+                    except Exception as e:
+                        print(f"Failed to load from local cache ({e}), falling back to online download...")
+                        dinov2_pretrained = torch.hub.load('facebookresearch/dinov2', 'dinov2_vitl14_reg')
+                else:
+                    # 2. 本地不存在，走在线下载（会自动缓存到 ～/.cache/torch/hub/...）
+                    print("Local DINOv2 cache not found. Downloading from GitHub...")
+                    dinov2_pretrained = torch.hub.load('facebookresearch/dinov2', 'dinov2_vitl14_reg')
+
+                # 3. 加载权重
+                self.patch_embed.load_state_dict(dinov2_pretrained.state_dict(), strict=False)
+                    
             elif patch_embed == "dinov2_vitb14_reg":
                 dinov2_pretrained = torch.hub.load('facebookresearch/dinov2', 'dinov2_vitb14_reg')
                 self.patch_embed.load_state_dict(dinov2_pretrained.state_dict(), strict=True)
