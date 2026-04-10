@@ -2,7 +2,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
-from typing import Literal, Optional, List, Dict
+from typing import Literal, Optional, List, Dict, Any
 import os
 import random
 import numpy as np
@@ -27,9 +27,9 @@ logger = logging.getLogger(__name__)
 class DatasetNuScenesCfg(DatasetCfgCommon):
     """Configuration for nuscenes dataset loader"""
     name: str
-    roots: list[Path]
+    roots: Any
     # Path to the text file containing scene IDs (e.g., nuScenes_Train.txt)
-    split_file_path: Path 
+    split_file_path: Optional[Path] = None
     baseline_min: float
     baseline_max: float
     max_fov: float
@@ -98,18 +98,16 @@ class DatasetNuScenes(Dataset):
         self.view_sampler = view_sampler
         self.to_tensor = tf.ToTensor()
         self.mask_to_tensor = tf.ToTensor()
-        
-        # Determine root directory (assuming roots[0] points to .../nuscenes/processed_10Hz/trainval or test)
-        self.data_root = Path(cfg.roots[0])
-        
-        # Load scene list from split file
+
+        self.data_root = self._resolve_data_root(cfg.roots)
+        self.split_file_path = self._resolve_split_file_path(cfg.roots, cfg.split_file_path)
+
+        # Load scene list from split file.
         if self.stage == "train":
-            self.scene_ids = self._load_split_file(cfg.split_file_path)
+            self.scene_ids = self._load_split_file(self.split_file_path)
         else:
-            # self.scene_ids = self._load_split_file(cfg.split_file_path.replace("Train", "Val"))
-            
-            new_path = Path(str(cfg.split_file_path).replace("Train", "Val"))
-            self.scene_ids = self._load_split_file(new_path)
+            val_split_file_path = Path(str(self.split_file_path).replace("Train", "Val"))
+            self.scene_ids = self._load_split_file(val_split_file_path)
         
         # Build index of valid samples
         # Each sample is (scene_id, start_timestep_index, camera_group_type)
@@ -118,6 +116,58 @@ class DatasetNuScenes(Dataset):
         
         logger.info(f"nuScenes Dataset: {self.stage}: loaded {len(self.samples)} samples from {len(self.scene_ids)} scenes")
         logger.info(f"Configuration: numTimes={self.cfg.numTimes}")
+
+    def _resolve_data_root(self, roots: Any) -> Path:
+        """Resolve the dataset root from legacy or nested NuScenes configs."""
+        if isinstance(roots, (str, Path)):
+            return Path(roots)
+
+        if isinstance(roots, dict):
+            for key in ("data_root", "root", "path"):
+                value = roots.get(key)
+                if value is not None:
+                    return Path(value)
+
+            nested_roots = roots.get("roots")
+            if nested_roots is not None:
+                return self._resolve_data_root(nested_roots)
+
+        if isinstance(roots, (list, tuple)):
+            for item in roots:
+                if isinstance(item, (str, Path)):
+                    return Path(item)
+                if isinstance(item, dict):
+                    for key in ("data_root", "root", "path"):
+                        value = item.get(key)
+                        if value is not None:
+                            return Path(value)
+
+        raise ValueError(f"Unable to resolve NuScenes data root from roots={roots!r}")
+
+    def _resolve_split_file_path(self, roots: Any, split_file_path: Optional[Path]) -> Path:
+        """Resolve the split file path from either the top level or nested roots config."""
+        if split_file_path is not None:
+            return Path(split_file_path)
+
+        if isinstance(roots, dict):
+            for key in ("split_file_path", "split_file", "split"):
+                value = roots.get(key)
+                if value is not None:
+                    return Path(value)
+
+            nested_roots = roots.get("roots")
+            if nested_roots is not None:
+                return self._resolve_split_file_path(nested_roots, None)
+
+        if isinstance(roots, (list, tuple)):
+            for item in roots:
+                if isinstance(item, dict):
+                    for key in ("split_file_path", "split_file", "split"):
+                        value = item.get(key)
+                        if value is not None:
+                            return Path(value)
+
+        raise ValueError(f"Unable to resolve NuScenes split file path from roots={roots!r}")
 
     def _load_split_file(self, split_path: Path) -> List[str]:
         """Load scene IDs from text file"""
@@ -368,8 +418,8 @@ class DatasetNuScenes(Dataset):
                     images.append(img_tensor)
                     
                     # Load Mask
-                    mask_tensor = self._load_mask(scene_path, ts, cid)
-                    masks.append(mask_tensor)
+                    # mask_tensor = self._load_mask(scene_path, ts, cid)
+                    # masks.append(mask_tensor)
                     
                     # Load Extrinsics
                     ext = self._read_extrinsics(scene_path, ts, cid)
@@ -383,21 +433,21 @@ class DatasetNuScenes(Dataset):
                     # depthmap = np.zeros((final_height, new_width), dtype=np.float32)
                     # mask = np.zeros_like(depthmap, dtype=bool)
                     
-                    depthmap_tensor_omnivggt = torch.zeros((self.TARGET_HEIGHT, self.TARGET_WIDTH), dtype=torch.float32)
-                    mask_tensor_omnivggt = torch.zeros((self.TARGET_HEIGHT, self.TARGET_WIDTH), dtype=torch.bool)
-                    ### debug print shape
-                    # print(f"Depthmap shape: {depthmap_tensor_omnivggt.shape}, Mask shape: {mask_tensor_omnivggt.shape}")
-                    # Depthmap shape: torch.Size([294, 518]), Mask shape: torch.Size([294, 518])
-                    depthmaps_omnivggt.append(depthmap_tensor_omnivggt)
-                    masks_omnivggt.append(mask_tensor_omnivggt)
+                    # depthmap_tensor_omnivggt = torch.zeros((self.TARGET_HEIGHT, self.TARGET_WIDTH), dtype=torch.float32)
+                    # mask_tensor_omnivggt = torch.zeros((self.TARGET_HEIGHT, self.TARGET_WIDTH), dtype=torch.bool)
+                    # ### debug print shape
+                    # # print(f"Depthmap shape: {depthmap_tensor_omnivggt.shape}, Mask shape: {mask_tensor_omnivggt.shape}")
+                    # # Depthmap shape: torch.Size([294, 518]), Mask shape: torch.Size([294, 518])
+                    # depthmaps_omnivggt.append(depthmap_tensor_omnivggt)
+                    # masks_omnivggt.append(mask_tensor_omnivggt)
 
             # Stack everything
             images = torch.stack(images) # (N_views, 3, H, W)
-            masks = torch.stack(masks)   # (N_views, 1, H, W)
+            # masks = torch.stack(masks)   # (N_views, 1, H, W)
             extrinsics = torch.from_numpy(np.stack(extrinsics)) # (N_views, 4, 4)
             intrinsics = torch.from_numpy(np.stack(intrinsics)) # (N_views, 3, 3)
-            depthmaps_omnivggt = torch.stack(depthmaps_omnivggt) # (N_views, H, W)
-            masks_omnivggt = torch.stack(masks_omnivggt) # (N_views, H, W)
+            # depthmaps_omnivggt = torch.stack(depthmaps_omnivggt) # (N_views, H, W)
+            # masks_omnivggt = torch.stack(masks_omnivggt) # (N_views, H, W)
 
             # Determine original image size for normalization
             # The provided intrinsics are based on original image size (likely)
@@ -497,15 +547,15 @@ class DatasetNuScenes(Dataset):
                     "extrinsics": extrinsics[indices],
                     "intrinsics": normalized_intrinsics[indices],
                     "image": images[indices],
-                    "fine_dynamic_masks": masks[indices], # Added field
+                    # "fine_dynamic_masks": masks[indices], # Added field
                     # "depth": torch.zeros_like(images[indices])[:, 0], # Placeholder depth
                     "near": self.get_bound("near", len(indices)) / scale,
                     "far": self.get_bound("far", len(indices)) / scale,
                     "index": indices,
-                    "depth": depthmaps_omnivggt[indices], # --- add for omni-vggt
-                    "mask_omnivggt": masks_omnivggt[indices],
-                    "camera_indices": camera_indices[indices],
-                    "depth_indices": depth_indices[indices],
+                    # "depth": depthmaps_omnivggt[indices], # --- add for omni-vggt
+                    # "mask_omnivggt": masks_omnivggt[indices],
+                    # "camera_indices": camera_indices[indices],
+                    # "depth_indices": depth_indices[indices],
                 }
 
             scene_id = scene_id + f"_ts{timesteps[0]:03d}_grp{'F' if use_front_group else 'B'}"

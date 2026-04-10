@@ -17,10 +17,6 @@ from tabulate import tabulate
 from torch import Tensor, nn, optim
 import torch.nn.functional as F
 
-from loss.loss_lpips import LossLpips
-from loss.loss_mse import LossMse
-from model.encoder.vggt.utils.pose_enc import pose_encoding_to_extri_intri
-
 from ..loss.loss_distill import DistillLoss
 from src.utils.render import generate_path
 from src.utils.point import get_normal_map
@@ -192,8 +188,8 @@ class ModelWrapper(LightningModule):
             batch = batch_combined
         
         batch: BatchedExample = self.data_shim(batch)
-        b, v, c, h, w = batch["context"]["image"].shape
-        context_image = (batch["context"]["image"] + 1) / 2
+        # b, v, c, h, w = batch["context"]["image"].shape
+        # context_image = (batch["context"]["image"] + 1) / 2
         
         # Run the model.
         visualization_dump = None
@@ -210,7 +206,7 @@ class ModelWrapper(LightningModule):
         batch["using_index"] = using_index
         
         target_gt = (batch["context"]["image"] + 1) / 2
-        scene_scale = infos["scene_scale"]
+        # scene_scale = infos["scene_scale"]
         self.log("train/scene_scale", infos["scene_scale"])
         self.log("train/voxelize_ratio", infos["voxelize_ratio"])
 
@@ -539,21 +535,21 @@ class ModelWrapper(LightningModule):
         
         
         ### 增加GT mask的可视化
-        gt_mask = batch["context"]["fine_dynamic_masks"][0] # b, v, 1, h, w
-        # print("****gt_mask shape:", gt_mask.shape)
-        if gt_mask.dim() == 4 and gt_mask.shape[1] == 1:
-            gt_mask = gt_mask.repeat(1, 3, 1, 1)  # -> (V, 3, H, W)
-            # 0-1 -> 0-255 uint8
-            gt_mask = (gt_mask * 255).clamp(0, 255).byte()
-            # 再变回 0-1 浮点，但值只有 0/1 对应 0/255
-            gt_mask = gt_mask.float() / 255.0 ### TODO: 保存的图片还是全白色的
-        gt_dynamic_mask_list = [gt_mask[i] for i in range(gt_mask.shape[0])]
+        # gt_mask = batch["context"]["fine_dynamic_masks"][0] # b, v, 1, h, w
+        # # print("****gt_mask shape:", gt_mask.shape)
+        # if gt_mask.dim() == 4 and gt_mask.shape[1] == 1:
+        #     gt_mask = gt_mask.repeat(1, 3, 1, 1)  # -> (V, 3, H, W)
+        #     # 0-1 -> 0-255 uint8
+        #     gt_mask = (gt_mask * 255).clamp(0, 255).byte()
+        #     # 再变回 0-1 浮点，但值只有 0/1 对应 0/255
+        #     gt_mask = gt_mask.float() / 255.0 ### TODO: 保存的图片还是全白色的
+        # gt_dynamic_mask_list = [gt_mask[i] for i in range(gt_mask.shape[0])]
     
         comparison = hcat(
             add_label(vcat(*context), "Context"),
             # add_label(vcat(*rgb_gt), "Target (Ground Truth)"),
             add_label(vcat(*rgb_pred), "Target (Prediction)"),
-            add_label(vcat(*gt_dynamic_mask_list), "Dynamic Mask(GT)"),
+            # add_label(vcat(*gt_dynamic_mask_list), "Dynamic Mask(GT)"),
             add_label(vcat(*depth_pred), "Depth (Prediction)"),
             add_label(vcat(*model_depth_pred), "Depth (Aggregator Prediction)"),
             add_label(vcat(*render_normal), "Normal (Prediction)"),

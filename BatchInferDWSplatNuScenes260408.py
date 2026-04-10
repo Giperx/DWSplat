@@ -17,7 +17,6 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Import Model and Geometry Utils
 # Assuming these paths exist based on your provided file context
 from src.model.model.anysplat import AnySplat 
-from src.model.encoder.vggt.utils.geometry import closed_form_inverse_se3
 # CUDA_VISIBLE_DEVICES=0 python BatchInferDWSplatNuScenes260408.py
 # --- Batch Settings ---
 BATCH_SIZE = 1
@@ -248,8 +247,8 @@ def main():
                 # v_exts = v_exts[:, :3, :] # Ensure 3x4 if util returned 4x4, usually it returns [B, V, 3, 4]
 
                 # Construct dummy fields required by TypeDefinition
-                v_masks = torch.zeros((3, TARGET_HEIGHT, TARGET_WIDTH), dtype=torch.bool)
-                v_depths = torch.zeros((3, TARGET_HEIGHT, TARGET_WIDTH), dtype=torch.float32)
+                # v_masks = torch.zeros((3, TARGET_HEIGHT, TARGET_WIDTH), dtype=torch.bool)
+                # v_depths = torch.zeros((3, TARGET_HEIGHT, TARGET_WIDTH), dtype=torch.float32)
                 v_cam_idxs_ts = torch.tensor([0, 1, 2], dtype=torch.int64) # Always 0,1,2 for group
                 v_depth_idxs_ts = torch.full((3,), -1, dtype=torch.int64)
 
@@ -257,8 +256,8 @@ def main():
                 b_images.append(v_imgs)
                 b_extrinsics.append(v_exts)
                 b_intrinsics.append(v_ints)
-                b_masks.append(v_masks)
-                b_depths.append(v_depths)
+                # b_masks.append(v_masks)
+                # b_depths.append(v_depths)
                 b_cam_idxs.append(v_cam_idxs_ts)
                 b_depth_idxs.append(v_depth_idxs_ts)
                 
@@ -282,8 +281,8 @@ def main():
                 "image": torch.stack(b_images).to(device),              # [B, 3, 3, H, W]
                 "extrinsics": torch.stack(b_extrinsics).to(device),     # [B, 3, 3, 4]
                 "intrinsics": torch.stack(b_intrinsics).to(device),     # [B, 3, 3, 3]
-                "mask_omnivggt": torch.stack(b_masks).to(device),       # [B, 3, H, W]
-                "depth": torch.stack(b_depths).to(device),              # [B, 3, H, W]
+                # "mask_omnivggt": torch.stack(b_masks).to(device),       # [B, 3, H, W]
+                # "depth": torch.stack(b_depths).to(device),              # [B, 3, H, W]
                 "camera_indices": torch.stack(b_cam_idxs).to(device),   # [B, 3]
                 "depth_indices": torch.stack(b_depth_idxs).to(device),  # [B, 3]
             },

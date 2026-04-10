@@ -5,13 +5,12 @@ import os
 import sys
 from copy import deepcopy
 from dataclasses import dataclass
+from pathlib import Path
 from typing import List, Literal, Optional
-
+from safetensors.torch import load_file
 import torch
 import torch.nn.functional as F
-import torchvision
 from einops import rearrange
-from huggingface_hub import PyTorchModelHubMixin
 from jaxtyping import Float
 from src.dataset.shims.bounds_shim import apply_bounds_shim
 from src.dataset.shims.normalize_shim import apply_normalize_shim
@@ -21,12 +20,7 @@ from src.geometry.projection import sample_image_grid
 
 from src.model.encoder.heads.vggt_dpt_gs_head import VGGT_DPT_GS_Head
 from src.model.encoder.heads.GaussianHead import GaussianHead, DPTHeadDGGT
-from src.model.encoder.vggt.utils.geometry import (
-    batchify_unproject_depth_map_to_point_map,
-    unproject_depth_map_to_point_map,
-)
-from src.model.encoder.vggt.utils.pose_enc import pose_encoding_to_extri_intri
-from src.utils.geometry import get_rel_pos  # used for model hub
+from src.model.encoder.vggt.utils.geometry import batchify_unproject_depth_map_to_point_map
 from torch import nn, Tensor
 from torch_scatter import scatter_add, scatter_max
 
@@ -41,15 +35,10 @@ from .common.gaussian_adapter import (
     UnifiedGaussianAdapterForDGGT
 )
 from .encoder import Encoder, EncoderOutput
-from .heads import head_factory
 from .visualization.encoder_visualizer_epipolar_cfg import EncoderVisualizerEpipolarCfg
 
 root_path = os.path.abspath(".")
 sys.path.append(root_path)
-# from src.model.encoder.heads.head_modules import TransformerBlockSelfAttn
-# from src.model.encoder.vggt.heads.dpt_head import DPTHead
-# from src.model.encoder.vggt.layers.mlp import Mlp
-# from src.model.encoder.vggt.models.vggt import VGGT
 
 ### add for omnivggt
 from src.model.encoder.omnivggt.models.omnivggt import OmniVGGT
@@ -103,15 +92,15 @@ class EncoderAnySplatCfg:
     frozenAggregator: bool = False
     frozenGaussianHead: bool = False
     useDGGTGaussianHead: bool = False
-    frozenCameraHead: bool = False
     frozenDepthHead: bool = False
+    useOG_OmniVGGT: bool = False
+    export_pt_path: str = 'ckpts/Weights'
     min_depth: float = 1.5
     max_depth: float = 110.0
     gt_pose_to_pts: bool = False
     gs_prune: bool = False
     opacity_threshold: float = 0.001
     gs_keep_ratio: float = 1.0
-    pred_head_type: Literal["depth", "point"] = "point"
     freeze_backbone: bool = False
     freeze_module: Literal[
         "all",
@@ -139,6 +128,35 @@ def rearrange_head(feat, patch_size, H, W):
     return feat
 
 
+def load_ckpt_state_dict(ckpt_path: str | Path) -> dict:
+    ckpt = torch.load(str(ckpt_path), map_location="cpu")
+
+    if isinstance(ckpt, dict):
+        for key in ("state_dict", "model_state_dict", "model"):
+            nested = ckpt.get(key)
+            if isinstance(nested, dict):
+                ckpt = nested
+                break
+
+    if not isinstance(ckpt, dict):
+        raise TypeError(f"Unsupported checkpoint format in {ckpt_path}: {type(ckpt)!r}")
+
+    return ckpt
+
+
+def strip_prefix_from_state_dict(state_dict: dict, prefix: str) -> dict:
+    if not prefix:
+        return state_dict
+
+    stripped_state_dict = {}
+    for key, value in state_dict.items():
+        if key.startswith(prefix):
+            stripped_state_dict[key[len(prefix):]] = value
+        else:
+            stripped_state_dict[key] = value
+    return stripped_state_dict
+
+
 class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
     backbone: nn.Module
     gaussian_adapter: GaussianAdapter
@@ -148,29 +166,44 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
         # model_full = VGGT.from_pretrained("facebook/VGGT-1B")
         # model_full = VGGT()
         model_full = OmniVGGT()
-        from safetensors.torch import load_file
-        state_dict = load_file("./checkpoints/OmniVGGT.safetensors")
-        model_full.load_state_dict(state_dict, strict=True)
-        # model_full.aggregator = model_full.aggregator.float()
+
         self.aggregator = model_full.aggregator
-        # self.aggregator = model_full.aggregator.to(torch.bfloat16)
+        self.depth_head = model_full.depth_head
+
+        if cfg.useOG_OmniVGGT:
+            state_dict = load_file("./checkpoints/OmniVGGT.safetensors")
+            model_full.load_state_dict(state_dict, strict=True)
+            model_full.aggregator = model_full.aggregator.float()
+            self.aggregator = model_full.aggregator.to(torch.bfloat16)
+            self.depth_head = model_full.depth_head
+        else:
+            export_root = Path(cfg.export_pt_path)
+            aggregator_ckpt = export_root / "aggregator_merged.ckpt"
+            depth_head_ckpt = export_root / "depth_head.ckpt"
+
+            agg_state = load_ckpt_state_dict(aggregator_ckpt)
+            dep_state = load_ckpt_state_dict(depth_head_ckpt)
+
+            agg_state = strip_prefix_from_state_dict(agg_state, "aggregator.")
+            dep_state = strip_prefix_from_state_dict(dep_state, "depth_head.")
+
+            missing_agg, unexpected_agg = self.aggregator.load_state_dict(agg_state, strict=False)
+            missing_dep, unexpected_dep = self.depth_head.load_state_dict(dep_state, strict=False)
+
+            print(f"Loaded aggregator ckpt: {aggregator_ckpt}")
+            print(f"aggregator missing={len(missing_agg)}, unexpected={len(unexpected_agg)}")
+            print(f"Loaded depth_head ckpt: {depth_head_ckpt}")
+            print(f"depth_head missing={len(missing_dep)}, unexpected={len(unexpected_dep)}")
+
         self.freeze_backbone = cfg.freeze_backbone
         self.distill = cfg.distill
         self.frozenAggregator = cfg.frozenAggregator
         self.frozenGaussianHead = cfg.frozenGaussianHead
-        self.frozenCameraHead = cfg.frozenCameraHead
         self.frozenDepthHead = cfg.frozenDepthHead
         self.pred_pose = cfg.pred_pose
 
         self.min_depth = cfg.min_depth
         self.max_depth = cfg.max_depth
-
-        self.camera_head = model_full.camera_head
-        # self.camera_head = None
-        if self.cfg.pred_head_type == "depth":
-            self.depth_head = model_full.depth_head
-        else:
-            self.point_head = model_full.point_head
 
         ### delete
         # if self.distill: 
@@ -187,15 +220,9 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
         #             param.data = param.data.cpu()
 
         if self.freeze_backbone:
-            # Freeze backbone components
-            if self.cfg.pred_head_type == "depth":
-                for module in [self.aggregator, self.depth_head]:
-                    for param in module.parameters():
-                        param.requires_grad = False
-            else:
-                for module in [self.aggregator, self.point_head]:
-                    for param in module.parameters():
-                        param.requires_grad = False
+            for module in [self.aggregator, self.depth_head]:
+                for param in module.parameters():
+                    param.requires_grad = False
         else:
             # aggregator freeze
             freeze_module = self.cfg.freeze_module
@@ -226,8 +253,6 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
         self.pose_free = cfg.pose_free
         self.useDGGTGaussianHead = cfg.useDGGTGaussianHead
         if self.pose_free:
-            # self.gaussian_adapter = UnifiedGaussianAdapter(cfg.gaussian_adapter)
-            # self.gaussian_adapter = UnifiedGaussianAdapterForDGGT(cfg.gaussian_adapter)
             if self.useDGGTGaussianHead:
                 self.gaussian_adapter = UnifiedGaussianAdapterForDGGT(cfg.gaussian_adapter)
             else:
@@ -257,11 +282,9 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
         del model_full
 
 
-        # self.dynamic_head = DPTHeadDGGT(dim_in= 1024, output_dim = 1 + 1, activation="linear") # ,down_ratio=2)#RGB
         
         print("self.frozenAggregator:", self.frozenAggregator,
               "self.frozenGaussianHead:", self.frozenGaussianHead,
-            #   "self.frozenCameraHead:", self.frozenCameraHead,
               "self.frozenDepthHead:", self.frozenDepthHead,
         )
         ### Freeze specific components
@@ -271,9 +294,6 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
         if self.frozenGaussianHead:
             for param in self.gaussian_param_head.parameters():
                 param.requires_grad = False
-        # if self.frozenCameraHead:
-        #     for param in self.camera_head.parameters():
-        #         param.requires_grad = False
         if self.frozenDepthHead:
             for param in self.depth_head.parameters():
                 param.requires_grad = False
@@ -283,7 +303,6 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
     def usePreTrainedWeights(self, flag: bool = True):
         print("self.frozenAggregator:", self.frozenAggregator,
               "self.frozenGaussianHead:", self.frozenGaussianHead,
-            #   "self.frozenCameraHead:", self.frozenCameraHead,
               "self.frozenDepthHead:", self.frozenDepthHead,
         )
         ### add pretrained weights loading pretrain AnySplat model
@@ -311,9 +330,6 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
         if self.frozenGaussianHead:
             for param in self.gaussian_param_head.parameters():
                 param.requires_grad = False
-        # if self.frozenCameraHead:
-        #     for param in self.camera_head.parameters():
-        #         param.requires_grad = False
         if self.frozenDepthHead:
             for param in self.depth_head.parameters():
                 param.requires_grad = False
@@ -439,7 +455,7 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
     ) -> Gaussians:
         image = (batch["context"]["image"] + 1) / 2
         device = image.device
-        b, v, _, h, w = image.shape
+        B, V, _, H, W = image.shape
         distill_infos = {}
         # if self.distill:
         #     distill_image = image.clone().detach()
@@ -522,61 +538,68 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
         #         del distill_extrinsic, distill_intrinsic
         #         del distill_depth_map, distill_depth_conf
         #         torch.cuda.empty_cache()
+        # Create zero tensors for depth as we don't use GT depth as input
+        # depth: [B, S, H, W, 1]
+        depth_omni = torch.zeros((B, V, H, W, 1), device=device, dtype=torch.float32)
+        mask_omni = torch.zeros((B, V, H, W, 1), device=device, dtype=torch.float32)
 
-        with torch.amp.autocast("cuda", enabled=False):
-            # aggregated_tokens_list, patch_start_idx = self.aggregator(
-            #     image.to(torch.bfloat16),
-            #     intermediate_layer_idx=self.cfg.intermediate_layer_idx,
-            # )
-            
-            ### for DGGT aggregator
-            # aggregated_tokens_list, image_tokens_list, dino_token_list, patch_start_idx = self.aggregator(
-            #     image.to(torch.bfloat16),
-            #     intermediate_layer_idx=self.cfg.intermediate_layer_idx,
-            # )
+        # depth 不输入 gt，因此保持为空；camera 提供当前输入的 S 个视角的内外参作为条件，因此为 0 ~ S-1
+        depth_gt_index = []
+        
+        # 50% probability to use camera conditioning to improve generalization.
+        # Use a deterministic seed based on global_step (if training) to ensure all DDP ranks make the same decision.
+        # This keeps the workload balanced across GPUs in the same step.
+        camera_gt_index = []
+        
+        # We need a way to get the current training step. In Lightning, we can pass it or use a default.
+        # For simplicity and robustness in multi-GPU, we can check if the model is in training mode.
+        is_training = self.training
+        
+        # To ensure all ranks are synchronized, we can't use random.random() directly if they might diverge.
+        # However, typically in DDP, the forward pass is called with the same step index.
+        # We use a simple hash of the images or a counter if available.
+        # Since this is a torch.nn.Module, we don't have easy access to 'global_step' here unless passed.
+        # But we can use the sum of images or a random seed that is synced.
+        
+        # Better: Use a fixed probability. Users often use a shared seed in DDP for such logic.
+        if is_training:
+            # Deterministic decision across ranks using a simple torch generator sync'd by seed if needed, 
+            # or just use a shared random state. Most DDP setups seed all ranks identically at start.
+            if torch.rand(1).item() < 0.5:
+                camera_gt_index = list(range(V))
+        else:
+            # Inference usually wants the best performance, so use camera conditioning.
+            camera_gt_index = list(range(V))
+
+        with torch.amp.autocast("cuda", enabled=True, dtype=torch.bfloat16):
             extrinsic = batch["context"]["extrinsics"]
             intrinsic = batch["context"]["intrinsics"]
             # print("intput int:rinsic:", intrinsic)
             aggregated_tokens_list, image_tokens_list, patch_start_idx = self.aggregator(images = image, 
                                                                     extrinsics = extrinsic, 
                                                                     intrinsics = intrinsic,
-                                                                    depth = batch["context"]["depth"],
-                                                                    mask = batch["context"]["mask_omnivggt"],
-                                                                    depth_gt_index = batch["context"]["depth_indices"],
-                                                                    camera_gt_index = batch["context"]["camera_indices"],
+                                                                    depth = depth_omni,
+                                                                    mask = mask_omni,
+                                                                    depth_gt_index = depth_gt_index,
+                                                                    camera_gt_index = camera_gt_index,
                                                                     )      
         with torch.amp.autocast("cuda", enabled=False):
-            # pred_pose_enc_list = self.camera_head(aggregated_tokens_list)
-            # last_pred_pose_enc = pred_pose_enc_list[-1]
-            # extrinsic, intrinsic = pose_encoding_to_extri_intri(
-            #     last_pred_pose_enc, image.shape[-2:]
-            # )  # only for debug
-            # print(intrinsic)
-            if self.cfg.pred_head_type == "point":
-                pts_all, pts_conf = self.point_head(
-                    aggregated_tokens_list,
-                    images=image,
-                    patch_start_idx=patch_start_idx,
-                )
-            elif self.cfg.pred_head_type == "depth":
-                depth_map, depth_conf = self.depth_head(
-                    aggregated_tokens_list,
-                    images=image,
-                    patch_start_idx=patch_start_idx,
-                )
+            depth_map, depth_conf = self.depth_head(
+                aggregated_tokens_list,
+                images=image,
+                patch_start_idx=patch_start_idx,
+            )
 
-                depth_map = torch.nn.functional.sigmoid(torch.log(depth_map))
+            depth_map = torch.nn.functional.sigmoid(torch.log(depth_map))
 
-                min_depth = self.min_depth
-                max_depth = self.max_depth
-                depth_range = max_depth-min_depth
-                depth_map = min_depth + depth_range * depth_map
+            min_depth = self.min_depth
+            max_depth = self.max_depth
+            depth_range = max_depth-min_depth
+            depth_map = min_depth + depth_range * depth_map
 
-                pts_all = batchify_unproject_depth_map_to_point_map(
-                    depth_map, extrinsic, intrinsic
-                )
-            else:
-                raise ValueError(f"Invalid pred_head_type: {self.cfg.pred_head_type}")
+            pts_all = batchify_unproject_depth_map_to_point_map(
+                depth_map, extrinsic, intrinsic
+            )
 
             if self.cfg.render_conf:
                 conf_valid = torch.quantile(
@@ -603,39 +626,28 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
         # dpt style gs_head input format
         if self.useDGGTGaussianHead:
             ### infer gs_head like DGGT
-            # out = self.gaussian_param_head(image_tokens_list, image, patch_start_idx)  
-            pass  
+            out = self.gaussian_param_head(image_tokens_list, image, patch_start_idx)  
         else:
             out = self.gaussian_param_head(
                 image_tokens_list, # aggregated_tokens_list, image_tokens_list
                 pts_all.flatten(0, 1).permute(0, 3, 1, 2),
                 image,
                 patch_start_idx=patch_start_idx,
-                image_size=(h, w),
+                image_size=(H, W),
             )
         
-
-        # dynamic_conf: (B, V, H, W, 1) depending on implementation
-        # dynamic_conf, _ = self.dynamic_head(dino_token_list, image, patch_start_idx)
-        # print("*******dynamic_conf shape:", dynamic_conf.shape) # torch.Size([1, 6, 224, 224, 1])
-        
-        del aggregated_tokens_list, patch_start_idx#, image_tokens_list, dino_token_list
+        del aggregated_tokens_list, patch_start_idx, image_tokens_list
         torch.cuda.empty_cache()
 
         pts_flat = pts_all.flatten(2, 3)
         scene_scale = pts_flat.norm(dim=-1).mean().clip(min=1e-8)
              
-        # infos = {}
-        # infos["dynamic_mask"] = dynamic_conf > 0.5  # Assuming > 0.5 is dynamic based on your description
-
         anchor_feats, conf = out[:, :, : self.raw_gs_dim], out[:, :, self.raw_gs_dim]
 
-
-        
         neural_feats_list, neural_pts_list = [], []
         
         if self.cfg.voxelize:
-            for b_i in range(b):
+            for b_i in range(B):
                 neural_pts, neural_feats = self.voxelizaton_with_fusion(
                     anchor_feats[b_i],
                     pts_all[b_i].permute(0, 3, 1, 2).contiguous(),
@@ -645,7 +657,7 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
                 neural_feats_list.append(neural_feats)
                 neural_pts_list.append(neural_pts)
         else:
-            for b_i in range(b):
+            for b_i in range(B):
                 neural_feats_list.append(
                     anchor_feats[b_i].permute(0, 2, 3, 1)[conf_valid_mask[b_i]]
                 )
@@ -661,17 +673,17 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
         )  # -1 == invalid voxel
 
         depths = neural_pts[..., -1].unsqueeze(-1)
-        densities = neural_feats[..., 0].sigmoid()
+        # densities = neural_feats[..., 0].sigmoid()
 
         ### for DGGT
         # opacity_idx = 3
         # densities = neural_feats[..., opacity_idx].sigmoid()
         
-        # if self.useDGGTGaussianHead:
-        #     opacity_idx = 3
-        #     densities = neural_feats[..., opacity_idx].sigmoid()       
-        # else:
-        #     densities = neural_feats[..., 0].sigmoid()
+        if self.useDGGTGaussianHead:
+            opacity_idx = 3
+            densities = neural_feats[..., opacity_idx].sigmoid()       
+        else:
+            densities = neural_feats[..., 0].sigmoid()
         
         assert len(densities.shape) == 2, "the shape of densities should be (B, N)"
         assert neural_pts.shape[1] > 1, "the number of voxels should be greater than 1"
@@ -688,7 +700,7 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
         # GS Prune, but only works when bs = 1
         # if want to support bs > 1, need to random prune gaussians based on the rank of opacity like LongLRM
         # Note: we not prune gaussians here, but we will try it in the future
-        if self.cfg.gs_prune and b == 1:
+        if self.cfg.gs_prune and B == 1:
             opacity_threshold = self.cfg.opacity_threshold
             gaussian_usage = opacity > opacity_threshold  # (B, N)
 
@@ -704,12 +716,12 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
                 gaussian_usage = torch.zeros_like(gaussian_usage, dtype=torch.bool)
                 gaussian_usage.scatter_(1, keep_idx, True)
 
-            neural_pts = neural_pts[gaussian_usage].view(b, -1, 3).contiguous()
-            depths = depths[gaussian_usage].view(b, -1, 1).contiguous()
+            neural_pts = neural_pts[gaussian_usage].view(B, -1, 3).contiguous()
+            depths = depths[gaussian_usage].view(B, -1, 1).contiguous()
             neural_feats = (
-                neural_feats[gaussian_usage].view(b, -1, self.raw_gs_dim).contiguous()
+                neural_feats[gaussian_usage].view(B, -1, self.raw_gs_dim).contiguous()
             )
-            opacity = opacity[gaussian_usage].view(b, -1).contiguous()
+            opacity = opacity[gaussian_usage].view(B, -1).contiguous()
 
             print(
                 f"finally pruned {gaussian_usage.shape[1] - neural_pts.shape[1]} gaussians out of {gaussian_usage.shape[1]}"
@@ -733,17 +745,17 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
             visualization_dump["depth"] = rearrange(
                 pts_all[..., -1].flatten(2, 3).unsqueeze(-1).unsqueeze(-1),
                 "b v (h w) srf s -> b v h w srf s",
-                h=h,
-                w=w,
+                h=H,
+                w=W,
             )
 
         infos = {}
         infos["scene_scale"] = scene_scale
-        infos["voxelize_ratio"] = densities.shape[1] / (h * w * v)
+        infos["voxelize_ratio"] = densities.shape[1] / (H * W * V)
 
         if global_step == 0 or (global_step > 40 and global_step % 50 == 0):
             print(
-                f"scene scale: {scene_scale:.3f}, pixel-wise num: {h*w*v}, after voxelize: {neural_pts.shape[1]}, voxelize ratio: {infos['voxelize_ratio']:.3f}"
+                f"scene scale: {scene_scale:.3f}, pixel-wise num: {H*W*V}, after voxelize: {neural_pts.shape[1]}, voxelize ratio: {infos['voxelize_ratio']:.3f}"
             )
             print(
                 f"Gaussians attributes: \n"
@@ -751,27 +763,25 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
                 f"scales: mean: {gaussians.scales.mean()}, min: {gaussians.scales.min()}, max: {gaussians.scales.max()}"
             )
 
-            print("B:", b, "V:", v, "H:", h, "W:", w)
+            print("B:", B, "V:", V, "H:", H, "W:", W)
         extrinsic_padding = (
             torch.tensor([0, 0, 0, 1], device=device, dtype=extrinsic.dtype)
             .view(1, 1, 1, 4)
-            .repeat(b, v, 1, 1)
+            .repeat(B, V, 1, 1)
         )
         intrinsic = intrinsic.clone()  # Create a new tensor
         intrinsic = torch.stack(
-            [intrinsic[:, :, 0] / w, intrinsic[:, :, 1] / h, intrinsic[:, :, 2]], dim=2
+            [intrinsic[:, :, 0] / W, intrinsic[:, :, 1] / H, intrinsic[:, :, 2]], dim=2
         )
 
-
-
         return EncoderOutput(
-            gaussians=gaussians, # 当前帧的动静高斯
+            gaussians=gaussians,
             pred_pose_enc_list=None,
             pred_context_pose=dict(
                 extrinsic=torch.cat([extrinsic, extrinsic_padding], dim=2).inverse(), # w2c become c2w
                 intrinsic=intrinsic,
             ),
-            depth_dict=dict(depth=depth_map, conf_valid_mask=conf_valid_mask), # 增加dynamic_conf
+            depth_dict=dict(depth=depth_map, conf_valid_mask=conf_valid_mask),
             infos=infos,
             distill_infos=distill_infos,
         )
