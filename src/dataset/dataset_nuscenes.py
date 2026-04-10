@@ -251,7 +251,8 @@ class DatasetNuScenes(Dataset):
         Format: 4x4 matrix, providing cam2world (or world2cam? usually cam2world in these datasets).
         Example provided: 4 rows.
         """
-        file_path = scene_path / "extrinsics" / f"{timestep:03d}_{cam_id}.txt"
+        # file_path = scene_path / "extrinsics" / f"{timestep:03d}_{cam_id}.txt"
+        file_path = scene_path / "cam2ego_extrinsics" / f"{cam_id}.txt"
         try:
             data = np.loadtxt(file_path, dtype=np.float32)
             if data.shape != (4, 4):
@@ -425,10 +426,10 @@ class DatasetNuScenes(Dataset):
                 curr_w, curr_h = original_w, original_h
 
             # Normalize to 0-1 range for view_sampler or model input
-            normalized_intrinsics[:, 0, 0] /= curr_w
-            normalized_intrinsics[:, 1, 1] /= curr_h
-            normalized_intrinsics[:, 0, 2] /= curr_w
-            normalized_intrinsics[:, 1, 2] /= curr_h
+            # normalized_intrinsics[:, 0, 0] /= curr_w
+            # normalized_intrinsics[:, 1, 1] /= curr_h
+            # normalized_intrinsics[:, 0, 2] /= curr_w
+            # normalized_intrinsics[:, 1, 2] /= curr_h
 
             # --- View Splitting (Context vs Target) ---
             # Total views = 3 * numTimes
@@ -460,23 +461,23 @@ class DatasetNuScenes(Dataset):
                 extrinsics[:, :3, 3] /= scale
 
             # 2. Relative Pose (Center scene around first context camera)
-            if self.cfg.relative_pose and len(context_indices) > 0:
-                first_ctx_idx = context_indices[0]
-                # inv_pose = torch.inverse(extrinsics[first_ctx_idx])
-                # Apply inverse of first context cam to all
-                # T_new = T_inv * T_old
-                # Note: extrinsics are typically c2w. To make first cam identity at origin:
-                # New_c2w = First_c2w^-1 * Current_c2w
-                # Check your camera_normalization utility for exact math.
-                # Assuming simple matrix multiplication here for c2w
+            # if self.cfg.relative_pose and len(context_indices) > 0:
+            #     first_ctx_idx = context_indices[0]
+            #     # inv_pose = torch.inverse(extrinsics[first_ctx_idx])
+            #     # Apply inverse of first context cam to all
+            #     # T_new = T_inv * T_old
+            #     # Note: extrinsics are typically c2w. To make first cam identity at origin:
+            #     # New_c2w = First_c2w^-1 * Current_c2w
+            #     # Check your camera_normalization utility for exact math.
+            #     # Assuming simple matrix multiplication here for c2w
                 
-                # However, many implementations use w2c for normalization logic. 
-                # Let's assume standard behavior: transform world coords such that context[0] is at origin.
-                # World_new = Context0_w2c * World_old
-                # Cam_new_c2w = Context0_w2c * Cam_old_c2w
-                c2w_0 = extrinsics[first_ctx_idx]
-                w2c_0 = torch.inverse(c2w_0)
-                extrinsics = torch.matmul(w2c_0.unsqueeze(0), extrinsics)
+            #     # However, many implementations use w2c for normalization logic. 
+            #     # Let's assume standard behavior: transform world coords such that context[0] is at origin.
+            #     # World_new = Context0_w2c * World_old
+            #     # Cam_new_c2w = Context0_w2c * Cam_old_c2w
+            #     c2w_0 = extrinsics[first_ctx_idx]
+            #     w2c_0 = torch.inverse(c2w_0)
+            #     extrinsics = torch.matmul(w2c_0.unsqueeze(0), extrinsics)
 
             # 3. Rescale to unit cube (fit all positions inside [-1, 1])
             if self.cfg.rescale_to_1cube:

@@ -105,6 +105,8 @@ class EncoderAnySplatCfg:
     useDGGTGaussianHead: bool = False
     frozenCameraHead: bool = False
     frozenDepthHead: bool = False
+    min_depth: float = 1.5
+    max_depth: float = 110.0
     gt_pose_to_pts: bool = False
     gs_prune: bool = False
     opacity_threshold: float = 0.001
@@ -160,7 +162,11 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
         self.frozenDepthHead = cfg.frozenDepthHead
         self.pred_pose = cfg.pred_pose
 
+        self.min_depth = cfg.min_depth
+        self.max_depth = cfg.max_depth
+
         self.camera_head = model_full.camera_head
+        # self.camera_head = None
         if self.cfg.pred_head_type == "depth":
             self.depth_head = model_full.depth_head
         else:
@@ -183,11 +189,11 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
         if self.freeze_backbone:
             # Freeze backbone components
             if self.cfg.pred_head_type == "depth":
-                for module in [self.aggregator, self.camera_head, self.depth_head]:
+                for module in [self.aggregator, self.depth_head]:
                     for param in module.parameters():
                         param.requires_grad = False
             else:
-                for module in [self.aggregator, self.camera_head, self.point_head]:
+                for module in [self.aggregator, self.point_head]:
                     for param in module.parameters():
                         param.requires_grad = False
         else:
@@ -255,7 +261,7 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
         
         print("self.frozenAggregator:", self.frozenAggregator,
               "self.frozenGaussianHead:", self.frozenGaussianHead,
-              "self.frozenCameraHead:", self.frozenCameraHead,
+            #   "self.frozenCameraHead:", self.frozenCameraHead,
               "self.frozenDepthHead:", self.frozenDepthHead,
         )
         ### Freeze specific components
@@ -265,9 +271,9 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
         if self.frozenGaussianHead:
             for param in self.gaussian_param_head.parameters():
                 param.requires_grad = False
-        if self.frozenCameraHead:
-            for param in self.camera_head.parameters():
-                param.requires_grad = False
+        # if self.frozenCameraHead:
+        #     for param in self.camera_head.parameters():
+        #         param.requires_grad = False
         if self.frozenDepthHead:
             for param in self.depth_head.parameters():
                 param.requires_grad = False
@@ -277,7 +283,7 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
     def usePreTrainedWeights(self, flag: bool = True):
         print("self.frozenAggregator:", self.frozenAggregator,
               "self.frozenGaussianHead:", self.frozenGaussianHead,
-              "self.frozenCameraHead:", self.frozenCameraHead,
+            #   "self.frozenCameraHead:", self.frozenCameraHead,
               "self.frozenDepthHead:", self.frozenDepthHead,
         )
         ### add pretrained weights loading pretrain AnySplat model
@@ -285,7 +291,7 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
         if flag:
             print("Using pretrained weights as distill.")
             self.distill_aggregator = copy.deepcopy(self.aggregator)
-            self.distill_camera_head = copy.deepcopy(self.camera_head)
+            # self.distill_camera_head = copy.deepcopy(self.camera_head)
             self.distill_depth_head = copy.deepcopy(self.depth_head)
         else:
             print("Not using pretrained weights. Using OG OmniVGGT weights.")
@@ -305,9 +311,9 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
         if self.frozenGaussianHead:
             for param in self.gaussian_param_head.parameters():
                 param.requires_grad = False
-        if self.frozenCameraHead:
-            for param in self.camera_head.parameters():
-                param.requires_grad = False
+        # if self.frozenCameraHead:
+        #     for param in self.camera_head.parameters():
+        #         param.requires_grad = False
         if self.frozenDepthHead:
             for param in self.depth_head.parameters():
                 param.requires_grad = False
@@ -528,21 +534,24 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
             #     image.to(torch.bfloat16),
             #     intermediate_layer_idx=self.cfg.intermediate_layer_idx,
             # )
+            extrinsic = batch["context"]["extrinsics"]
+            intrinsic = batch["context"]["intrinsics"]
+            # print("intput int:rinsic:", intrinsic)
             aggregated_tokens_list, image_tokens_list, patch_start_idx = self.aggregator(images = image, 
-                                                                    extrinsics = batch["context"]["extrinsics"], 
-                                                                    intrinsics = batch["context"]["intrinsics"],
+                                                                    extrinsics = extrinsic, 
+                                                                    intrinsics = intrinsic,
                                                                     depth = batch["context"]["depth"],
                                                                     mask = batch["context"]["mask_omnivggt"],
                                                                     depth_gt_index = batch["context"]["depth_indices"],
                                                                     camera_gt_index = batch["context"]["camera_indices"],
                                                                     )      
-        # with torch.amp.autocast("cuda", enabled=False):
-            pred_pose_enc_list = self.camera_head(aggregated_tokens_list)
-            last_pred_pose_enc = pred_pose_enc_list[-1]
-            extrinsic, intrinsic = pose_encoding_to_extri_intri(
-                last_pred_pose_enc, image.shape[-2:]
-            )  # only for debug
-
+        with torch.amp.autocast("cuda", enabled=False):
+            # pred_pose_enc_list = self.camera_head(aggregated_tokens_list)
+            # last_pred_pose_enc = pred_pose_enc_list[-1]
+            # extrinsic, intrinsic = pose_encoding_to_extri_intri(
+            #     last_pred_pose_enc, image.shape[-2:]
+            # )  # only for debug
+            # print(intrinsic)
             if self.cfg.pred_head_type == "point":
                 pts_all, pts_conf = self.point_head(
                     aggregated_tokens_list,
@@ -555,6 +564,14 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
                     images=image,
                     patch_start_idx=patch_start_idx,
                 )
+
+                depth_map = torch.nn.functional.sigmoid(torch.log(depth_map))
+
+                min_depth = self.min_depth
+                max_depth = self.max_depth
+                depth_range = max_depth-min_depth
+                depth_map = min_depth + depth_range * depth_map
+
                 pts_all = batchify_unproject_depth_map_to_point_map(
                     depth_map, extrinsic, intrinsic
                 )
@@ -579,7 +596,7 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
             del depth_conf_detached, conf_threshold_tmp, conf_mask_tmp
             
             # Store results
-            distill_infos["pred_pose_enc_list"] = pred_pose_enc_list
+            # distill_infos["pred_pose_enc_list"] = pred_pose_enc_list
             distill_infos["pts_all"] = pts_all
             distill_infos["depth_map"] = depth_map
 
@@ -724,7 +741,7 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
         infos["scene_scale"] = scene_scale
         infos["voxelize_ratio"] = densities.shape[1] / (h * w * v)
 
-        if global_step > 40 and global_step % 50 == 0:
+        if global_step == 0 or (global_step > 40 and global_step % 50 == 0):
             print(
                 f"scene scale: {scene_scale:.3f}, pixel-wise num: {h*w*v}, after voxelize: {neural_pts.shape[1]}, voxelize ratio: {infos['voxelize_ratio']:.3f}"
             )
@@ -749,7 +766,7 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
 
         return EncoderOutput(
             gaussians=gaussians, # 当前帧的动静高斯
-            pred_pose_enc_list=pred_pose_enc_list,
+            pred_pose_enc_list=None,
             pred_context_pose=dict(
                 extrinsic=torch.cat([extrinsic, extrinsic_padding], dim=2).inverse(), # w2c become c2w
                 intrinsic=intrinsic,

@@ -53,11 +53,11 @@ def extri_intri_to_pose_encoding(
         quat = mat_to_quat(R)
         # Note the order of h and w here
         H, W = image_size_hw
-        # fov_h = 2 * torch.atan((H / 2) / intrinsics[..., 1, 1])
-        # fov_w = 2 * torch.atan((W / 2) / intrinsics[..., 0, 0])
+        fov_h = 2 * torch.atan((H / 2) / intrinsics[..., 1, 1])
+        fov_w = 2 * torch.atan((W / 2) / intrinsics[..., 0, 0])
         ### change to normalized intrinsics
-        fov_h = 2 * torch.atan(0.5 / intrinsics[..., 1, 1])
-        fov_w = 2 * torch.atan(0.5 / intrinsics[..., 0, 0])
+        # fov_h = 2 * torch.atan(0.5 / intrinsics[..., 1, 1])
+        # fov_w = 2 * torch.atan(0.5 / intrinsics[..., 0, 0])
         pose_encoding = torch.cat([T, quat, fov_h[..., None], fov_w[..., None]], dim=-1).float()
     else:
         raise NotImplementedError
