@@ -203,7 +203,7 @@ change_OGCode0128.md
 README.md
 BatchInferDWSplatNuScenes260205.py
 Weights/*
-renders_val_omni/*
+renders_val*
 bf16_BatchInferDWSplatNuScenes260205.py
 nuScenes_Val2.txt
 InferDWSplatNuScenesShift260309.py
@@ -211,3 +211,4 @@ renders_val_omni_shift/*
 Weights/*
 nuScenes_Val2.txt
 requirements.txt
+change_OGCode0406.md
