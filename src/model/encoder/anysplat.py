@@ -171,7 +171,7 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
         self.depth_head = model_full.depth_head
 
         if cfg.useOG_OmniVGGT:
-            state_dict = load_file("./checkpoints/OmniVGGT.safetensors")
+            state_dict = load_file("./checkpoints/checkpoints/OmniVGGT.safetensors")
             model_full.load_state_dict(state_dict, strict=True)
             model_full.aggregator = model_full.aggregator.float()
             self.aggregator = model_full.aggregator.to(torch.bfloat16)

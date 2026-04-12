@@ -8,7 +8,7 @@ split_file_path: nuScenes_Train.txt
 numTimes: 1  # total number of timesteps in each scene
 injuecPose: true  # Whether to GT poses into Omni-VGGT
 
-input_image_shape: [252, 448]
+input_image_shape: [252, 448] # used for dataset_nuscenes
 original_image_shape: [900, 1600] # 252x448
 cameras_are_circular: false
 

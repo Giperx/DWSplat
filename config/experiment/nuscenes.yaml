@@ -11,6 +11,7 @@ wandb:
   name: nuScenes_omnivggt_finetune
   tags: [nuScenes, 252x448]
   mode: disabled # online offline disabled
+  tensorboard: true # only effective when mode=disabled; true -> log scalar curves to TensorBoard
   
 model:
   encoder:
@@ -25,7 +26,7 @@ model:
     gs_prune: false # ablate: opacity loss
     pred_head_type: depth
     freeze_backbone: true
-    useOG_OmniVGGT: false
+    useOG_OmniVGGT: true
     export_pt_path: 'checkpoints/merge_pts'
     distill: true
     frozenAggregator: true
@@ -48,7 +49,7 @@ dataset:
       num_target_views: 3
       # min_distance_between_context_views: 32
       # max_distance_between_context_views: 256
-      max_img_per_gpu: 9
+      max_img_per_gpu: 24
     avg_pose: false
     intr_augment: false
     normalize_by_pts3d: false
@@ -65,7 +66,8 @@ data_loader:
     
 trainer:
   max_steps: 120000
-  val_check_interval: 1500
+  val_check_interval: 100
+  log_every_n_steps: 50
   num_nodes: 1
   accumulate_grad_batches: 1
   precision: "bf16-mixed" #"32" bf16-mixed
@@ -74,17 +76,18 @@ checkpointing:
   load: null
   # load: outputs/exp_OmniVGGT_nuScenes_reTrain/2026-02-03_22-25-05/checkpoints/epoch_2-step_60000.ckpt
   log_save_dir: outputs/exp_OmniVGGT_${wandb.name}/${now:%Y-%m-%d_%H-%M-%S}
-  flag_gaussian_head: false # 是否读取Gaussian Head的权重
+  flag_gaussian_head: true # 是否读取Gaussian Head的权重
   every_n_train_steps: 10000
   save_weights_only: false
   save_top_k: 100
   
 train:
+  print_log_every_n_steps: 100
   pose_loss_alpha: 1.0
   pose_loss_delta: 1.0
   cxt_depth_weight: 0.0
-  weight_pose: 10.0 #10.0
-  weight_depth: 1.0 #1.0 # 1.0
+  weight_pose: 0.0 #10.0
+  weight_depth: 0.0 #1.0 # 1.0
   weight_normal: 0.0
 
 hydra:

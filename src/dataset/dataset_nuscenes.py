@@ -28,8 +28,6 @@ class DatasetNuScenesCfg(DatasetCfgCommon):
     """Configuration for nuscenes dataset loader"""
     name: str
     roots: Any
-    # Path to the text file containing scene IDs (e.g., nuScenes_Train.txt)
-    split_file_path: Optional[Path] = None
     baseline_min: float
     baseline_max: float
     max_fov: float
@@ -41,6 +39,8 @@ class DatasetNuScenesCfg(DatasetCfgCommon):
     rescale_to_1cube: bool
     intr_augment: bool
     normalize_by_pts3d: bool
+    # Path to the text file containing scene IDs (e.g., nuScenes_Train.txt)
+    split_file_path: Optional[Path] = None
     numTimes: int = 1  # Number of consecutive timestamps to load
     injuecPose: bool = False  # Whether to GT poses into Omni-VGGT
 
@@ -71,8 +71,8 @@ class DatasetNuScenes(Dataset):
     
     # Target size for resizing
     # TARGET_SIZE = 224  # 224 336 448
-    TARGET_HEIGHT = 294 #252
-    TARGET_WIDTH = 518 #448
+    TARGET_HEIGHT = 252 #252
+    TARGET_WIDTH = 448 #448
     
     # Camera mapping based on file naming convention {timestep}_{cam_id}.jpg
     # 0: CAM_FRONT
@@ -98,15 +98,20 @@ class DatasetNuScenes(Dataset):
         self.view_sampler = view_sampler
         self.to_tensor = tf.ToTensor()
         self.mask_to_tensor = tf.ToTensor()
-
+        self.TARGET_HEIGHT = cfg.input_image_shape[0]
+        self.TARGET_WIDTH = cfg.input_image_shape[1]
         self.data_root = self._resolve_data_root(cfg.roots)
         self.split_file_path = self._resolve_split_file_path(cfg.roots, cfg.split_file_path)
+        if not self.split_file_path.is_absolute():
+            self.split_file_path = self.data_root / self.split_file_path
 
         # Load scene list from split file.
         if self.stage == "train":
             self.scene_ids = self._load_split_file(self.split_file_path)
         else:
-            val_split_file_path = Path(str(self.split_file_path).replace("Train", "Val"))
+            val_split_file_path = self.split_file_path.with_name(
+                self.split_file_path.name.replace("Train", "Val")
+            )
             self.scene_ids = self._load_split_file(val_split_file_path)
         
         # Build index of valid samples
@@ -319,8 +324,8 @@ class DatasetNuScenes(Dataset):
         # Resize logic
         # if self.cfg.input_image_shape[0] == self.TARGET_SIZE and self.cfg.input_image_shape[1] == self.TARGET_SIZE:
         #     image = image.resize((self.TARGET_SIZE, self.TARGET_SIZE), Image.BILINEAR) # BICUBIC
-        if self.cfg.input_image_shape[0] == self.TARGET_HEIGHT and self.cfg.input_image_shape[1] == self.TARGET_WIDTH:
-            image = image.resize((self.TARGET_WIDTH, self.TARGET_HEIGHT), Image.BICUBIC)
+        # if self.cfg.input_image_shape[0] == self.TARGET_HEIGHT and self.cfg.input_image_shape[1] == self.TARGET_WIDTH:
+        image = image.resize((self.TARGET_WIDTH, self.TARGET_HEIGHT), Image.BICUBIC)
             
         return self.to_tensor(image)
 
@@ -339,8 +344,8 @@ class DatasetNuScenes(Dataset):
         
         # if self.cfg.input_image_shape[0] == self.TARGET_SIZE and self.cfg.input_image_shape[1] == self.TARGET_SIZE:
         #     image = image.resize((self.TARGET_SIZE, self.TARGET_SIZE), Image.NEAREST)
-        if self.cfg.input_image_shape[0] == self.TARGET_HEIGHT and self.cfg.input_image_shape[1] == self.TARGET_WIDTH:
-            image = image.resize((self.TARGET_WIDTH, self.TARGET_HEIGHT), Image.NEAREST)
+        # if self.cfg.input_image_shape[0] == self.TARGET_HEIGHT and self.cfg.input_image_shape[1] == self.TARGET_WIDTH:
+        image = image.resize((self.TARGET_WIDTH, self.TARGET_HEIGHT), Image.NEAREST)
         ### debug save image
         # debug_save_path = Path("debug_masks") / f"{timestep:03d}_{cam_id}.png"
         # os.makedirs(debug_save_path.parent, exist_ok=True)
@@ -453,28 +458,30 @@ class DatasetNuScenes(Dataset):
             # The provided intrinsics are based on original image size (likely)
             # Need to know original dims. Assuming 1600x900 from previous code or determining from file
             # Ideally read one image to get size, but for speed assume standard NuScenes
-            original_w, original_h = 1600.0, 900.0 
-            
+            # original_w, original_h = 1600.0, 900.0 
+            original_h, original_w = self.cfg.original_image_shape[0], self.cfg.original_image_shape[1]
+
             # Normalize Intrinsics and Resize Adjustment
             normalized_intrinsics = intrinsics.clone()
             
             # if self.cfg.input_image_shape[0] == self.TARGET_SIZE and self.cfg.input_image_shape[1] == self.TARGET_SIZE:
-            if self.cfg.input_image_shape[0] == self.TARGET_HEIGHT and self.cfg.input_image_shape[1] == self.TARGET_WIDTH:
-                # Intrinsics are for 1600x900, we resized to 448x448
-                s_x = float(self.TARGET_WIDTH) / original_w
-                s_y = float(self.TARGET_HEIGHT) / original_h
+            # if self.cfg.input_image_shape[0] == self.TARGET_HEIGHT and self.cfg.input_image_shape[1] == self.TARGET_WIDTH:
+            # Intrinsics are for 1600x900, we resized to TARGET_WIDTH x TARGET_HEIGHT, so we need to scale fx, fy, cx, cy accordingly.
+            s_x = float(self.TARGET_WIDTH) / original_w
+            s_y = float(self.TARGET_HEIGHT) / original_h
 
-                normalized_intrinsics[:, 0, 0] *= s_x # fx
-                normalized_intrinsics[:, 1, 1] *= s_y # fy
-                normalized_intrinsics[:, 0, 2] *= s_x # cx
-                normalized_intrinsics[:, 1, 2] *= s_y # cy
-                
-                # Update current dimensions for normalization
-                # curr_w, curr_h = float(self.TARGET_SIZE), float(self.TARGET_SIZE)
-                curr_w, curr_h = float(self.TARGET_WIDTH), float(self.TARGET_HEIGHT)
-            else:
-                curr_w, curr_h = original_w, original_h
+            normalized_intrinsics[:, 0, 0] *= s_x # fx
+            normalized_intrinsics[:, 1, 1] *= s_y # fy
+            normalized_intrinsics[:, 0, 2] *= s_x # cx
+            normalized_intrinsics[:, 1, 2] *= s_y # cy
+            
+            # Update current dimensions for normalization
+            # curr_w, curr_h = float(self.TARGET_SIZE), float(self.TARGET_SIZE)
+            curr_w, curr_h = float(self.TARGET_WIDTH), float(self.TARGET_HEIGHT)
+            # else:
+                # curr_w, curr_h = original_w, original_h
 
+            # 260412commnet: 不归一化，输入omnivggt中需要原始尺度的内参（内部extri_intri_to_pose_encoding会利用HW），后续在forward return时会进行归一化
             # Normalize to 0-1 range for view_sampler or model input
             # normalized_intrinsics[:, 0, 0] /= curr_w
             # normalized_intrinsics[:, 1, 1] /= curr_h

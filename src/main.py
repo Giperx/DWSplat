@@ -9,6 +9,7 @@ from colorama import Fore
 from jaxtyping import install_import_hook
 from lightning.pytorch import Trainer
 from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
+from lightning.pytorch.loggers import TensorBoardLogger
 from lightning.pytorch.loggers.wandb import WandbLogger
 from lightning.pytorch.plugins.environments import SLURMEnvironment
 from lightning.pytorch.strategies import DeepSpeedStrategy
@@ -91,7 +92,18 @@ def train(cfg_dict: DictConfig):
             "${wandb.name}",
             cfg_dict.wandb.name
         )
-        logger = LocalLogger(log_dir)
+        local_logger = LocalLogger(log_dir)
+
+        # When wandb is disabled, optionally log scalar curves to TensorBoard.
+        if cfg_dict.wandb.get("tensorboard", False):
+            tb_logger = TensorBoardLogger(
+                save_dir=log_dir,
+                name="tensorboard",
+            )
+            logger = [tb_logger, local_logger]
+            callbacks.append(LearningRateMonitor("step", True))
+        else:
+            logger = local_logger
         # logger = LocalLogger(cfg.checkpointing.log_save_dir)
     
     # Set up checkpointing.
@@ -128,6 +140,7 @@ def train(cfg_dict: DictConfig):
         # strategy="deepspeed_stage_1",
         callbacks=callbacks,
         val_check_interval=cfg.trainer.val_check_interval,
+        log_every_n_steps=cfg.trainer.log_every_n_steps,
         check_val_every_n_epoch=None,
         enable_progress_bar=False,
         gradient_clip_val=cfg.trainer.gradient_clip_val,

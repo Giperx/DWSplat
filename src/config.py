@@ -34,6 +34,7 @@ class TrainerCfg:
     max_steps: int
     val_check_interval: int | float | None
     gradient_clip_val: int | float | None
+    log_every_n_steps: int = 50
     num_nodes: int = 1
     accumulate_grad_batches: int = 1
     precision: Literal["32", "16-mixed", "bf16-mixed"] = "32"

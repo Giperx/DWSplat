@@ -167,6 +167,24 @@ class ModelWrapper(LightningModule):
             self.trainer.datamodule.val_loader.dataset.set_epoch(self.current_epoch)
         if hasattr(self.trainer.datamodule.val_loader.sampler, "set_epoch"):
             self.trainer.datamodule.val_loader.sampler.set_epoch(self.current_epoch)
+
+    def _iter_loggers(self) -> list[Any]:
+        if getattr(self, "loggers", None):
+            return [logger for logger in self.loggers if logger is not None]
+        if self.logger is not None:
+            return [self.logger]
+        return []
+
+    def _get_local_logger(self) -> Optional[LocalLogger]:
+        for logger in self._iter_loggers():
+            if isinstance(logger, LocalLogger):
+                return logger
+        return None
+
+    def _log_image(self, key: str, images: list[Any], step: int, caption: Optional[list[str]] = None) -> None:
+        for logger in self._iter_loggers():
+            if hasattr(logger, "log_image"):
+                logger.log_image(key, images, step=step, caption=caption)
         
     def training_step(self, batch, batch_idx):
         # combine batch from different dataloaders
@@ -235,37 +253,39 @@ class ModelWrapper(LightningModule):
         
         # Compute and log loss.
         total_loss = 0
+        loss_breakdown: list[str] = []
 
         depth_dict['distill_infos'] = distill_infos
         with torch.amp.autocast('cuda', enabled=False):
             for loss_fn in self.losses:
-                    cur_dynamic_loss = loss_fn.forward(output, batch, gaussians, depth_dict, self.global_step, static_flag=False)
-                    self.log(f"loss/{loss_fn.name}", cur_dynamic_loss)
-                    total_loss = total_loss + cur_dynamic_loss
+                cur_dynamic_loss = loss_fn.forward(output, batch, gaussians, depth_dict, self.global_step, static_flag=False)
+                self.log(f"loss/{loss_fn.name}", cur_dynamic_loss)
+                total_loss = total_loss + cur_dynamic_loss
+                loss_breakdown.append(f"{loss_fn.name}={cur_dynamic_loss.detach().float().item():.6f}")
 
             # 未使用
-            if depth_dict is not None and "depth" in get_cfg()["loss"].keys() and self.train_cfg.cxt_depth_weight > 0:
-                depth_loss_idx = list(get_cfg()["loss"].keys()).index("depth")
-                depth_loss_fn = self.losses[depth_loss_idx].ctx_depth_loss
-                loss_depth = depth_loss_fn(depth_dict["depth_map"], depth_dict["depth_conf"], batch, cxt_depth_weight=self.train_cfg.cxt_depth_weight)
-                self.log("loss/ctx_depth", loss_depth)
-                total_loss = total_loss + loss_depth
+            # if depth_dict is not None and "depth" in get_cfg()["loss"].keys() and self.train_cfg.cxt_depth_weight > 0:
+            #     depth_loss_idx = list(get_cfg()["loss"].keys()).index("depth")
+            #     depth_loss_fn = self.losses[depth_loss_idx].ctx_depth_loss
+            #     loss_depth = depth_loss_fn(depth_dict["depth_map"], depth_dict["depth_conf"], batch, cxt_depth_weight=self.train_cfg.cxt_depth_weight)
+            #     self.log("loss/ctx_depth", loss_depth)
+            #     total_loss = total_loss + loss_depth
 
-            if distill_infos is not None:
-                # distill ctx pred_pose & depth & normal
-                loss_distill_list = self.loss_distill(distill_infos, pred_pose_enc_list, output, batch)
-                self.log("loss/distill", loss_distill_list['loss_distill'])
-                self.log("loss/distill_pose", loss_distill_list['loss_pose'])
-                self.log("loss/distill_depth", loss_distill_list['loss_depth'])
-                self.log("loss/distill_normal", loss_distill_list['loss_normal'])
-                total_loss = total_loss + loss_distill_list['loss_distill']
+            # if distill_infos is not None:
+            #     # distill ctx pred_pose & depth & normal
+            #     loss_distill_list = self.loss_distill(distill_infos, pred_pose_enc_list, output, batch)
+            #     self.log("loss/distill", loss_distill_list['loss_distill'])
+            #     self.log("loss/distill_pose", loss_distill_list['loss_pose'])
+            #     self.log("loss/distill_depth", loss_distill_list['loss_depth'])
+            #     self.log("loss/distill_normal", loss_distill_list['loss_normal'])
+            #     total_loss = total_loss + loss_distill_list['loss_distill']
         
         self.log("loss/total", total_loss)
         # print(f"total_loss: {total_loss}")
 
         # Skip batch if loss is too high after certain step
         SKIP_AFTER_STEP = 1000  
-        LOSS_THRESHOLD = 0.2
+        LOSS_THRESHOLD = 10.0
         if self.global_step > SKIP_AFTER_STEP and total_loss > LOSS_THRESHOLD:
             print(f"Skipping batch with high loss ({total_loss:.6f}) at step {self.global_step} on Rank {self.global_rank}")
             # set to a really small number
@@ -279,9 +299,11 @@ class ModelWrapper(LightningModule):
                 f"train step {self.global_step}; "
                 f"scene = {[x for x in batch['scene']]}; "
                 f"context = {batch['context']['index'].tolist()}; "
-                f"loss = {total_loss:.6f}; "
+                # f"loss = {total_loss:.6f}; "
                 f"psnr_probabilistic = {psnr_probabilistic.mean():.2f}; "
             )
+            if loss_breakdown:
+                print(f"loss breakdown: {', '.join(loss_breakdown)}; total={total_loss.detach().float().item():.6f}")
             
         self.log("info/global_step", self.global_step)  # hack for ckpt monitor
         
@@ -564,7 +586,7 @@ class ModelWrapper(LightningModule):
             align_corners=False
         ).squeeze(0)
         
-        self.logger.log_image(
+        self._log_image(
             # f"images/{batch['scene'][0]}_b{batch_idx}",
             f"images/{batch['scene'][0]}",
             [prep_image(add_border(comparison))],
@@ -639,7 +661,7 @@ class ModelWrapper(LightningModule):
             align_corners=False
         ).squeeze(0)
         
-        self.logger.log_image(
+        self._log_image(
             f"wide_images/wide_{batch['scene'][0]}",
             [prep_image(add_border(comparison_wide))],
             step=self.global_step,
@@ -650,7 +672,7 @@ class ModelWrapper(LightningModule):
             for k, image in self.encoder_visualizer.visualize(
                 batch["context"], self.global_step
             ).items():
-                self.logger.log_image(k, [prep_image(image)], step=self.global_step)
+                self._log_image(k, [prep_image(image)], step=self.global_step)
         
         # Run video validation step.
         # self.render_video_interpolation(batch)
@@ -826,11 +848,13 @@ class ModelWrapper(LightningModule):
         try:
             wandb.log(visualizations)
         except Exception:
-            assert isinstance(self.logger, LocalLogger)
+            local_logger = self._get_local_logger()
+            if local_logger is None:
+                return
             for key, value in visualizations.items():
                 tensor = value._prepare_video(value.data)
                 clip = mpy.ImageSequenceClip(list(tensor), fps=15)
-                dir = self.logger.log_path / key
+                dir = local_logger.log_path / key
                 name_parts = dir.name.split("_")
                 if len(name_parts) > 1:
                     dir = dir.parent / "_".join(name_parts[:-1])
