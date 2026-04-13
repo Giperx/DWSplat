@@ -26,8 +26,8 @@ model:
     gs_prune: false # ablate: opacity loss
     pred_head_type: depth
     freeze_backbone: true
-    useOG_OmniVGGT: true
-    export_pt_path: 'checkpoints/merge_pts'
+    useOG_OmniVGGT: false
+    export_pt_path: 'checkpoints/merged_ckpts_00'
     distill: true
     frozenAggregator: true
     frozenGaussianHead: false
@@ -56,8 +56,8 @@ dataset:
     rescale_to_1cube: false
 
 optimizer:
-  lr: 9.3e-6 #2.2e-5 # 9.3e-6 imgs:9x2 # 1.25e-5 # 6.25e-6 imgs:12x1 # 2.5e-5 imgs:6x8 # 3.125e-6 imgs:6x1 #1.25e-6 5e-5 #2e-4 and 24 per gpu, 16 gpus
-  warm_up_steps: 6000
+  lr: 2e-5 #2.2e-5 # 9.3e-6 imgs:9x2 # 1.25e-5 # 6.25e-6 imgs:12x1 # 2.5e-5 imgs:6x8 # 3.125e-6 imgs:6x1 #1.25e-6 5e-5 #2e-4 and 24 per gpu, 16 gpus
+  warm_up_steps: 2000
   backbone_lr_multiplier: 0.1 #0.1
 
 data_loader:
@@ -65,8 +65,8 @@ data_loader:
     batch_size: 4 # not used here
     
 trainer:
-  max_steps: 120000
-  val_check_interval: 100
+  max_steps: 80000
+  val_check_interval: 1000
   log_every_n_steps: 50
   num_nodes: 1
   accumulate_grad_batches: 1
@@ -77,7 +77,7 @@ checkpointing:
   # load: outputs/exp_OmniVGGT_nuScenes_reTrain/2026-02-03_22-25-05/checkpoints/epoch_2-step_60000.ckpt
   log_save_dir: outputs/exp_OmniVGGT_${wandb.name}/${now:%Y-%m-%d_%H-%M-%S}
   flag_gaussian_head: true # 是否读取Gaussian Head的权重
-  every_n_train_steps: 10000
+  every_n_train_steps: 5000
   save_weights_only: false
   save_top_k: 100
   

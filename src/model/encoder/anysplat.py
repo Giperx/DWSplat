@@ -189,7 +189,7 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
 
             missing_agg, unexpected_agg = self.aggregator.load_state_dict(agg_state, strict=False)
             missing_dep, unexpected_dep = self.depth_head.load_state_dict(dep_state, strict=False)
-
+            self.aggregator = self.aggregator.to(torch.bfloat16)
             print(f"Loaded aggregator ckpt: {aggregator_ckpt}")
             print(f"aggregator missing={len(missing_agg)}, unexpected={len(unexpected_agg)}")
             print(f"Loaded depth_head ckpt: {depth_head_ckpt}")
@@ -313,7 +313,7 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
             # self.distill_camera_head = copy.deepcopy(self.camera_head)
             self.distill_depth_head = copy.deepcopy(self.depth_head)
         else:
-            print("Not using pretrained weights. Using OG OmniVGGT weights.")
+            print("Not using pretrained weights. Using about OmniVGGT weights.")
             
         # for module in [
         #     self.distill_aggregator,
@@ -562,14 +562,15 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
         # But we can use the sum of images or a random seed that is synced.
         
         # Better: Use a fixed probability. Users often use a shared seed in DDP for such logic.
-        if is_training:
-            # Deterministic decision across ranks using a simple torch generator sync'd by seed if needed, 
-            # or just use a shared random state. Most DDP setups seed all ranks identically at start.
-            if torch.rand(1).item() < 0.5:
-                camera_gt_index = list(range(V))
-        else:
-            # Inference usually wants the best performance, so use camera conditioning.
-            camera_gt_index = list(range(V))
+        # if is_training:
+        #     # Deterministic decision across ranks using a simple torch generator sync'd by seed if needed, 
+        #     # or just use a shared random state. Most DDP setups seed all ranks identically at start.
+        #     if torch.rand(1).item() < 0.5:
+        #         camera_gt_index = list(range(V))
+        # else:
+        #     # Inference usually wants the best performance, so use camera conditioning.
+        #     camera_gt_index = list(range(V))
+        camera_gt_index = list(range(V)) # fixed
 
         with torch.amp.autocast("cuda", enabled=True, dtype=torch.bfloat16):
             extrinsic = batch["context"]["extrinsics"]

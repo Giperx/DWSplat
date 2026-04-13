@@ -251,8 +251,8 @@ def main():
                 # Construct dummy fields required by TypeDefinition
                 # v_masks = torch.zeros((3, TARGET_HEIGHT, TARGET_WIDTH), dtype=torch.bool)
                 # v_depths = torch.zeros((3, TARGET_HEIGHT, TARGET_WIDTH), dtype=torch.float32)
-                v_cam_idxs_ts = torch.tensor([0, 1, 2], dtype=torch.int64) # Always 0,1,2 for group
-                v_depth_idxs_ts = torch.full((3,), -1, dtype=torch.int64)
+                # v_cam_idxs_ts = torch.tensor([0, 1, 2], dtype=torch.int64) # Always 0,1,2 for group
+                # v_depth_idxs_ts = torch.full((3,), -1, dtype=torch.int64)
 
                 # Append to Batch Lists
                 b_images.append(v_imgs)
@@ -261,8 +261,8 @@ def main():
                 b_intrinsics.append(v_ints)
                 # b_masks.append(v_masks)
                 # b_depths.append(v_depths)
-                b_cam_idxs.append(v_cam_idxs_ts)
-                b_depth_idxs.append(v_depth_idxs_ts)
+                # b_cam_idxs.append(v_cam_idxs_ts)
+                # b_depth_idxs.append(v_depth_idxs_ts)
                 
                 # Cache for fusion
                 if ENABLE_FUSION:
@@ -286,8 +286,8 @@ def main():
                 "intrinsics": torch.stack(b_intrinsics).to(device),     # [B, 3, 3, 3]
                 # "mask_omnivggt": torch.stack(b_masks).to(device),       # [B, 3, H, W]
                 # "depth": torch.stack(b_depths).to(device),              # [B, 3, H, W]
-                "camera_indices": torch.stack(b_cam_idxs).to(device),   # [B, 3]
-                "depth_indices": torch.stack(b_depth_idxs).to(device),  # [B, 3]
+                # "camera_indices": torch.stack(b_cam_idxs).to(device),   # [B, 3]
+                # "depth_indices": torch.stack(b_depth_idxs).to(device),  # [B, 3]
             },
             # "target" is usually not needed for pure inference if we manually decode, 
             # or we can alias context if the model code requires it.
@@ -295,7 +295,7 @@ def main():
         }
 
         # Save 4x4 extrinsics for decoder
-        b_extrinsics_original = torch.stack(b_extrinsics).to(device) # [B, 3, 4, 4]
+        # b_extrinsics_original = torch.stack(b_extrinsics).to(device) # [B, 3, 4, 4]
 
         # Normalize Images to [-1, 1] for model input (Loader does this implicitly or explicitly?)
         # Dataset loader returns [0,1] from ToTensor. 

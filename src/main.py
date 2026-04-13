@@ -25,6 +25,10 @@ from src.misc.hf_checkpoint_loader import prepare_checkpoint_path
 import warnings
 warnings.filterwarnings("ignore")
 
+
+def _is_rank_zero() -> bool:
+    return int(os.environ.get("RANK", "0")) == 0
+
 # Configure beartype and jaxtyping.
 with install_import_hook(
     ("src",),
@@ -60,8 +64,6 @@ def train(cfg_dict: DictConfig):
         hydra.core.hydra_config.HydraConfig.get()["runtime"]["output_dir"]
     )
     output_dir.mkdir(parents=True, exist_ok=True)
-    print(cyan(f"Saving outputs to {output_dir}."))
-    
     cfg.train.output_path = output_dir
     
     # Set up logging with wandb.
@@ -92,6 +94,12 @@ def train(cfg_dict: DictConfig):
             "${wandb.name}",
             cfg_dict.wandb.name
         )
+        if _is_rank_zero():
+            from src.misc.LocalLogger import enable_console_log
+
+            console_log_path = enable_console_log(log_dir)
+            print(cyan(f"Console log saved to {console_log_path}."))
+        print(cyan(f"Saving outputs to {output_dir}."))
         local_logger = LocalLogger(log_dir)
 
         # When wandb is disabled, optionally log scalar curves to TensorBoard.
