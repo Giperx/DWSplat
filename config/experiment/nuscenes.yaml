@@ -20,7 +20,7 @@ model:
     intrinsics_embed_loc: encoder
     intrinsics_embed_type: token
     pretrained_weights: ''
-    voxel_size: 0.12
+    voxel_size: 0.025
     pred_pose: true
     anchor_feat_dim: 128
     gs_prune: false # ablate: opacity loss
@@ -82,7 +82,7 @@ checkpointing:
   save_top_k: 100
   
 train:
-  print_log_every_n_steps: 100
+  print_log_every_n_steps: 50
   pose_loss_alpha: 1.0
   pose_loss_delta: 1.0
   cxt_depth_weight: 0.0

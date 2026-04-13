@@ -131,8 +131,8 @@ class UnifiedGaussianAdapter(GaussianAdapter):
         # scales = scales.clamp_max(0.5)
         # scales = 0.1 * F.softplus(scales) 
         # 恢复物理真实尺度（乘以 ~46 倍）后的推荐修改:
-        scales = 0.138 * F.softplus(scales) # # 0.003 * 46 = 0.138 0.5 * 46 = 23
-        scales = scales.clamp_max(23.0)  # 放宽最大限制到 10m~15m 左右，允许远处的背景有大体积高斯
+        # scales = 0.138 * F.softplus(scales) # # 0.003 * 46 = 0.138 0.5 * 46 = 23
+        # scales = scales.clamp_max(23.0)  # 放宽最大限制到 10m~15m 左右，允许远处的背景有大体积高斯
         # scales = 0.1 * F.softplus(scales)
         # scales = scales.clamp_max(15.0)
         # 这两个约束不变，在vol为0.5时：
@@ -149,7 +149,18 @@ class UnifiedGaussianAdapter(GaussianAdapter):
         # scales = 0.003 * F.softplus(scales)
         # scales = scales.clamp_max(0.5)
         # 这时候，是scene scale: 1.299, pixel-wise num: 338688, after voxelize: 320843, voxelize ratio: 0.947
-# 
+        
+        # 使用lora fine tuning后：
+        scales = 0.064 * F.softplus(scales)  # 0.003 * 23 = 0.064 0.5 * 23 = 12
+        scales = scales.clamp_max(12.0)
+        # vol为0.06时：
+        # scene scale: 33.380, pixel-wise num: 338688, after voxelize: 271020, voxelize ratio: 0.800
+        # vol为0.04时：
+        # scene scale: 29.332, pixel-wise num: 338688, after voxelize: 302795, voxelize ratio: 0.894
+        # vol为0.03时：
+        # scene scale: 28.118, pixel-wise num: 338688, after voxelize: 311952, voxelize ratio: 0.921
+        # vol为0.025时：
+        # scene scale: 32.474, pixel-wise num: 338688, after voxelize: 321749, voxelize ratio: 0.950
         # Normalize the quaternion features to yield a valid quaternion.
         rotations = rotations / (rotations.norm(dim=-1, keepdim=True) + eps)
         
