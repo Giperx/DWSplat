@@ -16,6 +16,10 @@ DecoderCfg = DecoderSplattingCUDACfg
 
 
 # hard code for now
-def get_model(encoder_cfg: EncoderCfg, decoder_cfg: DecoderCfg) -> nn.Module:
-    model = MODELS['anysplat'](encoder_cfg, decoder_cfg)
+def get_model(
+    encoder_cfg: EncoderCfg,
+    decoder_cfg: DecoderCfg,
+    print_log_every_n_steps: int,
+) -> nn.Module:
+    model = MODELS['anysplat'](encoder_cfg, decoder_cfg, print_log_every_n_steps)
     return model

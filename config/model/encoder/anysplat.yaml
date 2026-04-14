@@ -33,7 +33,7 @@ pose_free: true
 pretrained_weights: ""
 scale_align: false
 enable_high_conf_supplement: true
-high_conf_supplement_threshold: 0.7
+high_conf_supplement_quantile: 0.7
 
 voxel_size: 0.001
 n_offsets: 2

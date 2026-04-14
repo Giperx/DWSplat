@@ -41,7 +41,7 @@ model:
     voxelize: true
     intermediate_layer_idx: [4, 11, 17, 23]
     enable_high_conf_supplement: true
-    high_conf_supplement_threshold: 0.7
+    high_conf_supplement_quantile: 0.8
     
 dataset:
   nuscenes:
@@ -51,14 +51,14 @@ dataset:
       num_target_views: 3
       # min_distance_between_context_views: 32
       # max_distance_between_context_views: 256
-      max_img_per_gpu: 24
+      max_img_per_gpu: 21
     avg_pose: false
     intr_augment: false
     normalize_by_pts3d: false
     rescale_to_1cube: false
 
 optimizer:
-  lr: 5e-5 #2.2e-5 # 9.3e-6 imgs:9x2 # 1.25e-5 # 6.25e-6 imgs:12x1 # 2.5e-5 imgs:6x8 # 3.125e-6 imgs:6x1 #1.25e-6 5e-5 #2e-4 and 24 per gpu, 16 gpus
+  lr: 4.3e-5 #2.2e-5 # 9.3e-6 imgs:9x2 # 1.25e-5 # 6.25e-6 imgs:12x1 # 2.5e-5 imgs:6x8 # 3.125e-6 imgs:6x1 #1.25e-6 5e-5 #2e-4 and 24 per gpu, 16 gpus
   warm_up_steps: 2000
   backbone_lr_multiplier: 0.1 #0.1
 
@@ -70,13 +70,14 @@ trainer:
   max_steps: 40000
   val_check_interval: 1000
   log_every_n_steps: 50
+  print_log_every_n_steps: 10
   num_nodes: 1
   accumulate_grad_batches: 1
   precision: "bf16-mixed" #"32" bf16-mixed
 
 checkpointing:
-  load: null
-  # load: outputs/exp_OmniVGGT_nuScenes_omnivggt_finetune/2026-04-14_10-01-01/checkpoints/epoch_1-step_5000.ckpt
+  # load: null
+  load: outputs/exp_OmniVGGT_nuScenes_omnivggt_finetune/2026-04-14_16-51-26/checkpoints/epoch_1-step_5000.ckpt
   log_save_dir: outputs/exp_OmniVGGT_${wandb.name}/${now:%Y-%m-%d_%H-%M-%S}
   flag_gaussian_head: true # 是否读取Gaussian Head的权重
   every_n_train_steps: 5000
@@ -84,7 +85,6 @@ checkpointing:
   save_top_k: 100
   
 train:
-  print_log_every_n_steps: 50
   pose_loss_alpha: 1.0
   pose_loss_delta: 1.0
   cxt_depth_weight: 0.0

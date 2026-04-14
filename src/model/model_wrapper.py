@@ -312,7 +312,7 @@ class ModelWrapper(LightningModule):
             self.step_tracker.set_step(self.global_step)
         
         del batch
-        if self.global_step % 50 == 0:
+        if self.global_step % 30 == 0:
             gc.collect()
             torch.cuda.empty_cache()
 

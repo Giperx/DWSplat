@@ -160,7 +160,11 @@ def train(cfg_dict: DictConfig):
     )
     torch.manual_seed(cfg_dict.seed + trainer.global_rank)
     
-    model = get_model(cfg.model.encoder, cfg.model.decoder)
+    model = get_model(
+        cfg.model.encoder,
+        cfg.model.decoder,
+        cfg.train.print_log_every_n_steps,
+    )
     
     model_wrapper = ModelWrapper(
         cfg.optimizer,

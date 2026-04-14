@@ -117,7 +117,7 @@ class EncoderAnySplatCfg:
     opacity_conf: bool = False
     conf_threshold: float = 0.1
     enable_high_conf_supplement: bool = True
-    high_conf_supplement_threshold: float = 0.7
+    high_conf_supplement_quantile: float = 0.9
     intermediate_layer_idx: Optional[List[int]] = None
     voxelize: bool = False
 
@@ -207,6 +207,7 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
         self.min_depth = cfg.min_depth
         self.max_depth = cfg.max_depth
 
+        self.print_log_every_n_steps = cfg.print_log_every_n_steps
         ### delete
         # if self.distill: 
         #     self.distill_aggregator = copy.deepcopy(self.aggregator)
@@ -615,9 +616,13 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
             ## add conf_mask for loss_depth_consis
             depth_conf_detached = depth_conf.detach()
             if self.cfg.enable_high_conf_supplement:
-                high_conf_mask = (
-                    depth_conf_detached > self.cfg.high_conf_supplement_threshold
+                high_conf_threshold = torch.quantile(
+                    depth_conf_detached.flatten(2, 3),
+                    self.cfg.high_conf_supplement_quantile,
+                    dim=-1,
+                    keepdim=True,
                 )
+                high_conf_mask = depth_conf_detached > high_conf_threshold.unsqueeze(-1)
             else:
                 high_conf_mask = torch.zeros_like(depth_conf_detached, dtype=torch.bool)
             if high_conf_mask.shape != conf_valid_mask.shape:
@@ -656,7 +661,10 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
         anchor_feats, conf = out[:, :, : self.raw_gs_dim], out[:, :, self.raw_gs_dim]
 
         neural_feats_list, neural_pts_list = [], []
-        supplement_gs_num = 0
+        # voxelized_gs_num = 0
+        # supplement_gs_num = 0
+        first_batch_voxelized_gs_num = 0
+        first_batch_supplement_gs_num = 0
         
         if self.cfg.voxelize:
             for b_i in range(B):
@@ -666,13 +674,18 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
                     self.voxel_size,
                     conf=conf[b_i],
                 )
+                # voxelized_gs_num += int(neural_pts.shape[0])
+                if b_i == 0:
+                    first_batch_voxelized_gs_num = int(neural_pts.shape[0])
 
                 # Add a high-confidence branch from depth_conf to supplement fused gaussians.
                 supplement_mask = high_conf_mask[b_i]
                 supplement_feats = anchor_feats[b_i].permute(0, 2, 3, 1)[supplement_mask]
                 supplement_pts = pts_all[b_i][supplement_mask]
                 if supplement_feats.shape[0] > 0:
-                    supplement_gs_num += int(supplement_feats.shape[0])
+                    # supplement_gs_num += int(supplement_feats.shape[0])
+                    if b_i == 0:
+                        first_batch_supplement_gs_num = int(supplement_feats.shape[0])
                     neural_feats = torch.cat([neural_feats, supplement_feats], dim=0)
                     neural_pts = torch.cat([neural_pts, supplement_pts], dim=0)
 
@@ -682,15 +695,21 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
             for b_i in range(B):
                 neural_feats = anchor_feats[b_i].permute(0, 2, 3, 1)[conf_valid_mask[b_i]]
                 neural_pts = pts_all[b_i][conf_valid_mask[b_i]]
+                # voxelized_gs_num += int(neural_pts.shape[0])
+                if b_i == 0:
+                    first_batch_voxelized_gs_num = int(neural_pts.shape[0])
 
                 # Avoid duplicating points that were already selected by conf_valid_mask.
                 supplement_mask = high_conf_mask[b_i] & (~conf_valid_mask[b_i])
                 supplement_feats = anchor_feats[b_i].permute(0, 2, 3, 1)[supplement_mask]
                 supplement_pts = pts_all[b_i][supplement_mask]
                 if supplement_feats.shape[0] > 0:
-                    supplement_gs_num += int(supplement_feats.shape[0])
+                    # supplement_gs_num += int(supplement_feats.shape[0])
+                    if b_i == 0:
+                        first_batch_supplement_gs_num = int(supplement_feats.shape[0])
                     neural_feats = torch.cat([neural_feats, supplement_feats], dim=0)
                     neural_pts = torch.cat([neural_pts, supplement_pts], dim=0)
+
 
                 neural_feats_list.append(neural_feats)
                 neural_pts_list.append(neural_pts)
@@ -783,13 +802,65 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
 
         infos = {}
         infos["scene_scale"] = scene_scale
-        infos["voxelize_ratio"] = densities.shape[1] / (H * W * V)
-        infos["supplement_gs_num"] = supplement_gs_num
+        # total_pixel_num = B * H * W * V
+        first_batch_pixel_num = H * W * V
+        # total_gs_num = voxelized_gs_num + supplement_gs_num
+        infos["voxelize_ratio"] = first_batch_voxelized_gs_num / first_batch_pixel_num
+        # infos["supplement_ratio"] = supplement_gs_num / total_pixel_num
+        # infos["voxelized_gs_num"] = voxelized_gs_num
+        # infos["supplement_gs_num"] = supplement_gs_num
+        # infos["total_gs_num"] = total_gs_num
+        # infos["padded_gs_num"] = gaussians.means.shape[1]
+        # infos["first_batch_voxelized_gs_num"] = first_batch_voxelized_gs_num
+        # infos["first_batch_supplement_gs_num"] = first_batch_supplement_gs_num
+        # infos["first_batch_total_gs_num"] = first_batch_voxelized_gs_num + first_batch_supplement_gs_num
 
-        if global_step == 0 or (global_step > 40 and global_step % 50 == 0):
-            print(
-                f"scene scale: {scene_scale:.3f}, pixel-wise num: {H*W*V}, after voxelize: {neural_pts.shape[1]}, supplement gs num: {supplement_gs_num}, voxelize ratio: {infos['voxelize_ratio']:.3f}"
+        if global_step == 0 or ( global_step % self.print_log_every_n_steps == 0):
+            first_batch_total_gs_num = (
+                first_batch_voxelized_gs_num + first_batch_supplement_gs_num
             )
+            padded_gs_num = gaussians.means.shape[1]
+            after_supplement_total_ratio = padded_gs_num / first_batch_pixel_num
+            print(
+                f"scene scale: {scene_scale:.3f}, "
+                f"pixel-wise num: {first_batch_pixel_num}, "
+                f"first-batch vol gs num: {first_batch_voxelized_gs_num}, "
+                f"vol ratio: {infos['voxelize_ratio']:.3f} | "
+                f"first-batch sup gs num: {first_batch_supplement_gs_num} | "
+                f"first-batch total gs num: {first_batch_total_gs_num}, "
+                f"after sup total ratio: {after_supplement_total_ratio:.3f}, "
+                f"padded gs num: {padded_gs_num}"
+            )
+            # if B > 0:
+            #     print("First-batch depth_conf stats per view:")
+            #     for v_i in range(V):
+            #         conf_map = depth_conf[0, v_i].detach().float()
+            #         if conf_map.ndim == 3:
+            #             conf_map = conf_map.squeeze(-1)
+
+            #         conf_min = conf_map.min().item()
+            #         conf_max = conf_map.max().item()
+            #         conf_mean = conf_map.mean().item()
+            #         conf_std = conf_map.std(unbiased=False).item()
+            #         q01 = torch.quantile(conf_map, 0.01).item()
+            #         q10 = torch.quantile(conf_map, 0.10).item()
+            #         q50 = torch.quantile(conf_map, 0.50).item()
+            #         q90 = torch.quantile(conf_map, 0.90).item()
+            #         q99 = torch.quantile(conf_map, 0.99).item()
+
+            #         hist_min = conf_min
+            #         hist_max = conf_max if conf_max > conf_min else conf_min + 1e-6
+            #         hist = torch.histc(conf_map, bins=10, min=hist_min, max=hist_max)
+            #         hist = hist.to(torch.int64).tolist()
+            #         conf_high_threshold = torch.quantile(
+            #             conf_map, self.cfg.high_conf_supplement_quantile
+            #         ).item()
+            #         conf_high_ratio = (conf_map > conf_high_threshold).float().mean().item()
+            #         print(
+            #             f"  view {v_i}: min={conf_min:.4f}, max={conf_max:.4f}, mean={conf_mean:.4f}, std={conf_std:.4f}, "
+            #             f"q01={q01:.4f}, q10={q10:.4f}, q50={q50:.4f}, q90={q90:.4f}, q99={q99:.4f}, "
+            #             f"q{int(self.cfg.high_conf_supplement_quantile * 100):02d}_thr={conf_high_threshold:.4f}, >thr={conf_high_ratio:.4f}, hist[10 bins in min-max]={hist}"
+            #         )
             print(
                 f"Gaussians attributes: \n"
                 f"opacities: mean: {gaussians.opacities.mean()}, min: {gaussians.opacities.min()}, max: {gaussians.opacities.max()} \n"
