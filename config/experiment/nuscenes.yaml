@@ -20,13 +20,13 @@ model:
     intrinsics_embed_loc: encoder
     intrinsics_embed_type: token
     pretrained_weights: ''
-    voxel_size: 0.025
+    voxel_size: 0.12
     pred_pose: true
     anchor_feat_dim: 128
     gs_prune: false # ablate: opacity loss
     pred_head_type: depth
     freeze_backbone: true
-    useOG_OmniVGGT: false
+    useOG_OmniVGGT: true
     export_pt_path: 'checkpoints/merged_ckpts_00'
     distill: true
     frozenAggregator: true
@@ -56,7 +56,7 @@ dataset:
     rescale_to_1cube: false
 
 optimizer:
-  lr: 2e-5 #2.2e-5 # 9.3e-6 imgs:9x2 # 1.25e-5 # 6.25e-6 imgs:12x1 # 2.5e-5 imgs:6x8 # 3.125e-6 imgs:6x1 #1.25e-6 5e-5 #2e-4 and 24 per gpu, 16 gpus
+  lr: 5e-5 #2.2e-5 # 9.3e-6 imgs:9x2 # 1.25e-5 # 6.25e-6 imgs:12x1 # 2.5e-5 imgs:6x8 # 3.125e-6 imgs:6x1 #1.25e-6 5e-5 #2e-4 and 24 per gpu, 16 gpus
   warm_up_steps: 2000
   backbone_lr_multiplier: 0.1 #0.1
 
@@ -65,7 +65,7 @@ data_loader:
     batch_size: 4 # not used here
     
 trainer:
-  max_steps: 80000
+  max_steps: 40000
   val_check_interval: 1000
   log_every_n_steps: 50
   num_nodes: 1
@@ -74,7 +74,7 @@ trainer:
 
 checkpointing:
   load: null
-  # load: outputs/exp_OmniVGGT_nuScenes_reTrain/2026-02-03_22-25-05/checkpoints/epoch_2-step_60000.ckpt
+  # load: outputs/exp_OmniVGGT_nuScenes_omnivggt_finetune/2026-04-14_10-01-01/checkpoints/epoch_1-step_5000.ckpt
   log_save_dir: outputs/exp_OmniVGGT_${wandb.name}/${now:%Y-%m-%d_%H-%M-%S}
   flag_gaussian_head: true # 是否读取Gaussian Head的权重
   every_n_train_steps: 5000
