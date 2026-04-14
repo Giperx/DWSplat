@@ -116,6 +116,8 @@ class EncoderAnySplatCfg:
     render_conf: bool = False
     opacity_conf: bool = False
     conf_threshold: float = 0.1
+    enable_high_conf_supplement: bool = True
+    high_conf_supplement_threshold: float = 0.7
     intermediate_layer_idx: Optional[List[int]] = None
     voxelize: bool = False
 
@@ -612,6 +614,14 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
                 
             ## add conf_mask for loss_depth_consis
             depth_conf_detached = depth_conf.detach()
+            if self.cfg.enable_high_conf_supplement:
+                high_conf_mask = (
+                    depth_conf_detached > self.cfg.high_conf_supplement_threshold
+                )
+            else:
+                high_conf_mask = torch.zeros_like(depth_conf_detached, dtype=torch.bool)
+            if high_conf_mask.shape != conf_valid_mask.shape:
+                high_conf_mask = high_conf_mask.squeeze(-1)
             conf_threshold_tmp = torch.quantile(
                 depth_conf_detached.flatten(2, 3), 0.3, dim=-1, keepdim=True
             )  # Get threshold for each view
@@ -646,6 +656,7 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
         anchor_feats, conf = out[:, :, : self.raw_gs_dim], out[:, :, self.raw_gs_dim]
 
         neural_feats_list, neural_pts_list = [], []
+        supplement_gs_num = 0
         
         if self.cfg.voxelize:
             for b_i in range(B):
@@ -655,14 +666,34 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
                     self.voxel_size,
                     conf=conf[b_i],
                 )
+
+                # Add a high-confidence branch from depth_conf to supplement fused gaussians.
+                supplement_mask = high_conf_mask[b_i]
+                supplement_feats = anchor_feats[b_i].permute(0, 2, 3, 1)[supplement_mask]
+                supplement_pts = pts_all[b_i][supplement_mask]
+                if supplement_feats.shape[0] > 0:
+                    supplement_gs_num += int(supplement_feats.shape[0])
+                    neural_feats = torch.cat([neural_feats, supplement_feats], dim=0)
+                    neural_pts = torch.cat([neural_pts, supplement_pts], dim=0)
+
                 neural_feats_list.append(neural_feats)
                 neural_pts_list.append(neural_pts)
         else:
             for b_i in range(B):
-                neural_feats_list.append(
-                    anchor_feats[b_i].permute(0, 2, 3, 1)[conf_valid_mask[b_i]]
-                )
-                neural_pts_list.append(pts_all[b_i][conf_valid_mask[b_i]])
+                neural_feats = anchor_feats[b_i].permute(0, 2, 3, 1)[conf_valid_mask[b_i]]
+                neural_pts = pts_all[b_i][conf_valid_mask[b_i]]
+
+                # Avoid duplicating points that were already selected by conf_valid_mask.
+                supplement_mask = high_conf_mask[b_i] & (~conf_valid_mask[b_i])
+                supplement_feats = anchor_feats[b_i].permute(0, 2, 3, 1)[supplement_mask]
+                supplement_pts = pts_all[b_i][supplement_mask]
+                if supplement_feats.shape[0] > 0:
+                    supplement_gs_num += int(supplement_feats.shape[0])
+                    neural_feats = torch.cat([neural_feats, supplement_feats], dim=0)
+                    neural_pts = torch.cat([neural_pts, supplement_pts], dim=0)
+
+                neural_feats_list.append(neural_feats)
+                neural_pts_list.append(neural_pts)
 
         max_voxels = max(f.shape[0] for f in neural_feats_list)
         neural_feats = self.pad_tensor_list(
@@ -753,10 +784,11 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
         infos = {}
         infos["scene_scale"] = scene_scale
         infos["voxelize_ratio"] = densities.shape[1] / (H * W * V)
+        infos["supplement_gs_num"] = supplement_gs_num
 
         if global_step == 0 or (global_step > 40 and global_step % 50 == 0):
             print(
-                f"scene scale: {scene_scale:.3f}, pixel-wise num: {H*W*V}, after voxelize: {neural_pts.shape[1]}, voxelize ratio: {infos['voxelize_ratio']:.3f}"
+                f"scene scale: {scene_scale:.3f}, pixel-wise num: {H*W*V}, after voxelize: {neural_pts.shape[1]}, supplement gs num: {supplement_gs_num}, voxelize ratio: {infos['voxelize_ratio']:.3f}"
             )
             print(
                 f"Gaussians attributes: \n"

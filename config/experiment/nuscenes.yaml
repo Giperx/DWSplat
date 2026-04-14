@@ -40,6 +40,8 @@ model:
     freeze_module: all
     voxelize: true
     intermediate_layer_idx: [4, 11, 17, 23]
+    enable_high_conf_supplement: true
+    high_conf_supplement_threshold: 0.7
     
 dataset:
   nuscenes:
