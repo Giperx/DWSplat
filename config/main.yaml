@@ -16,7 +16,7 @@ mode: train
 data_loader:
   # Avoid having to spin up new processes to print out visualizations.
   train:
-    num_workers: 8 # 16
+    num_workers: 16 # 16
     persistent_workers: true
     batch_size: 4
     seed: 1234
