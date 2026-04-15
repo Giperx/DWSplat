@@ -312,7 +312,7 @@ class ModelWrapper(LightningModule):
             self.step_tracker.set_step(self.global_step)
         
         del batch
-        if self.global_step % 50 == 0:
+        if self.global_step % 30 == 0:
             gc.collect()
             torch.cuda.empty_cache()
 
@@ -625,7 +625,7 @@ class ModelWrapper(LightningModule):
 
 
         ### add 验证时就可以输出宽视野图像
-        _, output_wide = self.model(batch, self.global_step, visualization_dump=visualization_dump, wide_fov=True, new_width=1036) 
+        _, output_wide = self.model(batch, self.global_step, visualization_dump=visualization_dump, wide_fov=True, new_width=w*2) 
         rgb_pred_wide = output_wide.color[0].float()
         # depth_pred_wide = vis_depth_map(output_wide.depth[0])
         # render_normal_wide = (get_normal_map(output_wide.depth.flatten(0, 1), batch["context"]["intrinsics"].flatten(0, 1)).permute(0, 3, 1, 2) + 1) / 2.
