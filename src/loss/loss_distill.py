@@ -131,21 +131,21 @@ class DistillLoss(nn.Module):
 
         loss_depth = F.mse_loss(pred_depth[conf_mask], pesudo_gt_depth[conf_mask], reduction='none').mean()
 
-        render_normal = get_normal_map(pred_depth, batch["context"]["intrinsics"].flatten(0, 1))
-        pred_normal = get_normal_map(pesudo_gt_depth, batch["context"]["intrinsics"].flatten(0, 1))
+        # render_normal = get_normal_map(pred_depth, batch["context"]["intrinsics"].flatten(0, 1))
+        # pred_normal = get_normal_map(pesudo_gt_depth, batch["context"]["intrinsics"].flatten(0, 1))
        
-        alpha1_loss = (1 - (render_normal[conf_mask] * pred_normal[conf_mask]).sum(-1)).mean()
-        alpha2_loss = F.l1_loss(render_normal[conf_mask], pred_normal[conf_mask], reduction='mean')
-        loss_normal = (alpha1_loss + alpha2_loss) / 2
+        # alpha1_loss = (1 - (render_normal[conf_mask] * pred_normal[conf_mask]).sum(-1)).mean()
+        # alpha2_loss = F.l1_loss(render_normal[conf_mask], pred_normal[conf_mask], reduction='mean')
+        # loss_normal = (alpha1_loss + alpha2_loss) / 2
         
-        loss_distill = loss_pose * self.weight_pose + loss_depth * self.weight_depth + loss_normal * self.weight_normal
+        loss_distill = loss_pose * self.weight_pose + loss_depth * self.weight_depth # + loss_normal * self.weight_normal
         loss_distill = torch.nan_to_num(loss_distill, nan=0.0, posinf=0.0, neginf=0.0)
         
         loss_dict = {
             "loss_distill": loss_distill,
             "loss_pose": loss_pose * self.weight_pose,
             "loss_depth": loss_depth * self.weight_depth,
-            "loss_normal": loss_normal * self.weight_normal
+            "loss_normal": None # loss_normal * self.weight_normal
         }
 
         return loss_dict

@@ -597,7 +597,7 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
                 patch_start_idx=patch_start_idx,
             )
 
-            # depth_map = torch.nn.functional.sigmoid(torch.log(depth_map))
+            # depth_maps = torch.sigmoid(torch.log(torch.clamp(depth_maps, min=1e-6)))
 
             # min_depth = self.min_depth
             # max_depth = self.max_depth
