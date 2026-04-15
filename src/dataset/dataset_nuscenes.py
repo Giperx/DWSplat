@@ -518,23 +518,23 @@ class DatasetNuScenes(Dataset):
                 extrinsics[:, :3, 3] /= scale
 
             # 2. Relative Pose (Center scene around first context camera)
-            # if self.cfg.relative_pose and len(context_indices) > 0:
-            #     first_ctx_idx = context_indices[0]
-            #     # inv_pose = torch.inverse(extrinsics[first_ctx_idx])
-            #     # Apply inverse of first context cam to all
-            #     # T_new = T_inv * T_old
-            #     # Note: extrinsics are typically c2w. To make first cam identity at origin:
-            #     # New_c2w = First_c2w^-1 * Current_c2w
-            #     # Check your camera_normalization utility for exact math.
-            #     # Assuming simple matrix multiplication here for c2w
+            if self.cfg.relative_pose and len(context_indices) > 0:
+                first_ctx_idx = context_indices[0]
+                # inv_pose = torch.inverse(extrinsics[first_ctx_idx])
+                # Apply inverse of first context cam to all
+                # T_new = T_inv * T_old
+                # Note: extrinsics are typically c2w. To make first cam identity at origin:
+                # New_c2w = First_c2w^-1 * Current_c2w
+                # Check your camera_normalization utility for exact math.
+                # Assuming simple matrix multiplication here for c2w
                 
-            #     # However, many implementations use w2c for normalization logic. 
-            #     # Let's assume standard behavior: transform world coords such that context[0] is at origin.
-            #     # World_new = Context0_w2c * World_old
-            #     # Cam_new_c2w = Context0_w2c * Cam_old_c2w
-            #     c2w_0 = extrinsics[first_ctx_idx]
-            #     w2c_0 = torch.inverse(c2w_0)
-            #     extrinsics = torch.matmul(w2c_0.unsqueeze(0), extrinsics)
+                # However, many implementations use w2c for normalization logic. 
+                # Let's assume standard behavior: transform world coords such that context[0] is at origin.
+                # World_new = Context0_w2c * World_old
+                # Cam_new_c2w = Context0_w2c * Cam_old_c2w
+                c2w_0 = extrinsics[first_ctx_idx]
+                w2c_0 = torch.inverse(c2w_0)
+                extrinsics = torch.matmul(w2c_0.unsqueeze(0), extrinsics)
 
             # 3. Rescale to unit cube (fit all positions inside [-1, 1])
             if self.cfg.rescale_to_1cube:

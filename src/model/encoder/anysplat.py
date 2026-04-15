@@ -597,12 +597,12 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
                 patch_start_idx=patch_start_idx,
             )
 
-            depth_map = torch.nn.functional.sigmoid(torch.log(depth_map))
+            # depth_map = torch.nn.functional.sigmoid(torch.log(depth_map))
 
-            min_depth = self.min_depth
-            max_depth = self.max_depth
-            depth_range = max_depth-min_depth
-            depth_map = min_depth + depth_range * depth_map
+            # min_depth = self.min_depth
+            # max_depth = self.max_depth
+            # depth_range = max_depth-min_depth
+            # depth_map = min_depth + depth_range * depth_map
 
             pts_all = batchify_unproject_depth_map_to_point_map(
                 depth_map, extrinsic, intrinsic
