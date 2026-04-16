@@ -59,7 +59,10 @@ dataset:
     rescale_to_1cube: false
 
 optimizer:
-  lr: 5e-6 #2.2e-5 # 9.3e-6 imgs:9x2 # 1.25e-5 # 6.25e-6 imgs:12x1 # 2.5e-5 imgs:6x8 # 3.125e-6 imgs:6x1 #1.25e-6 5e-5 #2e-4 and 24 per gpu, 16 gpus
+  lr: 3e-5 
+  # 2e-4 and 24 per gpu, 16 gpus
+  # 1gpu, 9imgs, 3e-5    linear scale: 4.6e-6
+  # 4gpu, 9imgs, 6e-5    linear scale: 1.8e-5
   warm_up_steps: 3000
   backbone_lr_multiplier: 0.1 #0.1
 
@@ -90,8 +93,10 @@ train:
   pose_loss_delta: 1.0
   cxt_depth_weight: 0.0
   weight_pose: 0.0 #10.0
-  weight_depth: 1.0 #1.0 # 1.0
-  weight_depth_norm: 0.5
+  weight_depth: 1.0 # loss_depth_l1 + loss_depth_gradient
+  weight_depth_l1: 0.1 # gs render depth and distill depth-head metric depth
+  weight_depth_gradient: 0.1 # gs render depth and distill depth-head metric depth
+  weight_depth_norm_head: 0.5 # depth-head norm depth adn distill depth-head norm depth
   weight_normal: 0.0
 
 hydra:

@@ -93,7 +93,9 @@ class TrainCfg:
     weight_pose: float = 1.0
     weight_depth: float = 1.0
     weight_normal: float = 1.0
-    weight_depth_norm: float = 1.0
+    weight_depth_l1: float = 0.5
+    weight_depth_gradient: float = 0.5
+    weight_depth_norm_head: float = 0.5
     render_ba: bool = False
     render_ba_after_step: int = 0
 
@@ -149,7 +151,9 @@ class ModelWrapper(LightningModule):
                 weight_pose=self.train_cfg.weight_pose,
                 weight_depth=self.train_cfg.weight_depth,
                 weight_normal=self.train_cfg.weight_normal,
-                weight_depth_norm=self.train_cfg.weight_depth_norm,
+                weight_depth_l1=self.train_cfg.weight_depth_l1,
+                weight_depth_gradient=self.train_cfg.weight_depth_gradient,
+                weight_depth_norm_head=self.train_cfg.weight_depth_norm_head,
             )
 
         # This is used for testing.
