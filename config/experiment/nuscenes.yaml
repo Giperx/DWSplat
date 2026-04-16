@@ -67,17 +67,17 @@ data_loader:
     batch_size: 4 # not used here
     
 trainer:
-  max_steps: 40000
+  max_steps: 120000
   val_check_interval: 1000
   log_every_n_steps: 50
-  print_log_every_n_steps: 10
+  print_log_every_n_steps: 25
   num_nodes: 1
   accumulate_grad_batches: 1
   precision: "bf16-mixed" #"32" bf16-mixed
 
 checkpointing:
-  load: null
-  # load: outputs/exp_OmniVGGT_nuScenes_omnivggt_finetune/2026-04-14_16-51-26/checkpoints/epoch_1-step_5000.ckpt
+  # load: null
+  load: outputs/exp_OmniVGGT_nuScenes_omnivggt_finetune/2026-04-15_21-15-46_work1v2_add_gs_12000/checkpoints/epoch_1-step_10000.ckpt
   log_save_dir: outputs/exp_OmniVGGT_${wandb.name}/${now:%Y-%m-%d_%H-%M-%S}
   flag_gaussian_head: true # 是否读取Gaussian Head的权重
   every_n_train_steps: 5000

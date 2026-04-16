@@ -281,6 +281,12 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
                 conf_activation="expp1",
                 features=head_params.feature_dim,
             )
+            
+        gs_head_state = load_ckpt_state_dict("checkpoints/merged_0202_epoch5/gaussian_param_head_weights.pth")
+        gs_head_state = strip_prefix_from_state_dict(gs_head_state, "gaussian_param_head.")
+        missing_gs, unexpected_gs = self.gaussian_param_head.load_state_dict(gs_head_state, strict=False)
+        print(f"Loaded gs_head ckpt: checkpoints/merged_0202_epoch5/gaussian_param_head_weights.pth")
+        print(f"gs_head missing={len(missing_gs)}, unexpected={len(unexpected_gs)}")
         
         del model_full
 
