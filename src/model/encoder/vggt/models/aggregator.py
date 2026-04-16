@@ -325,11 +325,11 @@ class Aggregator(nn.Module):
         # Concatenate special tokens with patch tokens
         tokens = torch.cat([camera_token, register_token, patch_tokens], dim=1)
 
-        penultimate_features = self.patch_embed.get_intermediate_layers(images, n=24)
-        dino_token_list = []
-        for i in range(len(penultimate_features)):
-            dino_tokens = torch.cat([camera_token, register_token, penultimate_features[i]], dim=1).view(B, S, -1, C) #tokens 
-            dino_token_list.append(dino_tokens)
+        # penultimate_features = self.patch_embed.get_intermediate_layers(images, n=24)
+        # dino_token_list = []
+        # for i in range(len(penultimate_features)):
+        #     dino_tokens = torch.cat([camera_token, register_token, penultimate_features[i]], dim=1).view(B, S, -1, C) #tokens 
+        #     dino_token_list.append(dino_tokens)
         #dino_tokens = tokens.view(B, S, -1, C)
 
         pos = None
@@ -379,9 +379,9 @@ class Aggregator(nn.Module):
                         output_list.append(concat_inter)
                         
                         #TODO: use dino feature only or not
-                        concat_inter_with_tokens = torch.cat([dino_token_list[i], frame_intermediates[i], global_intermediates[i]], dim=-1)
-                        #concat_inter_with_tokens = dino_token_list[i]
-                        output_list_with_tokens.append(concat_inter_with_tokens)
+                        # concat_inter_with_tokens = torch.cat([dino_token_list[i], frame_intermediates[i], global_intermediates[i]], dim=-1)
+                        # #concat_inter_with_tokens = dino_token_list[i]
+                        # output_list_with_tokens.append(concat_inter_with_tokens)
                         
                 layer_idx += self.aa_block_size
             
@@ -391,17 +391,17 @@ class Aggregator(nn.Module):
                     concat_inter = torch.cat([frame_intermediates[i], global_intermediates[i]], dim=-1)
                     output_list.append(concat_inter)
                     #TODO: use dino feature only or not
-                    concat_inter_with_tokens = torch.cat([dino_token_list[i], frame_intermediates[i], global_intermediates[i]], dim=-1)
-                    #concat_inter_with_tokens = dino_token_list[i]
-                    output_list_with_tokens.append(concat_inter_with_tokens)
+                    # concat_inter_with_tokens = torch.cat([dino_token_list[i], frame_intermediates[i], global_intermediates[i]], dim=-1)
+                    # #concat_inter_with_tokens = dino_token_list[i]
+                    # output_list_with_tokens.append(concat_inter_with_tokens)
         
         del concat_inter
         del frame_intermediates
         del global_intermediates
-        del concat_inter_with_tokens
+        # del concat_inter_with_tokens
         # del dino_token_list
-        # return output_list, self.patch_start_idx
-        return output_list, output_list_with_tokens, dino_token_list, self.patch_start_idx
+        return output_list, self.patch_start_idx
+        # return output_list, output_list_with_tokens, dino_token_list, self.patch_start_idx
     
     def _process_frame_attention(self, tokens, B, S, P, C, frame_idx, pos=None):
         """

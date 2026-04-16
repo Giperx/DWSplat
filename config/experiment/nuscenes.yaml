@@ -7,9 +7,9 @@ defaults:
   - override /loss: [mse, lpips, depth_consis] # ablate: opacity loss
 
 wandb:
-  project: anysplat_04
+  project: anysplat_04_sup_gs_distill_recon
   name: nuScenes_omnivggt_finetune
-  tags: [nuScenes, 252x448]
+  tags: [nuScenes, 294x518]
   mode: disabled # online offline disabled
   tensorboard: true # only effective when mode=disabled; true -> log scalar curves to TensorBoard
   
@@ -25,19 +25,20 @@ model:
     anchor_feat_dim: 128
     gs_prune: false # ablate: opacity loss
     pred_head_type: depth
-    freeze_backbone: true
+    freeze_backbone: false # means freeze aggregator and depth head
     useOG_OmniVGGT: true
     export_pt_path: 'checkpoints/merged_ckpts_00'
     distill: true
-    frozenAggregator: true
+    frozenAggregator: false # not used
     frozenGaussianHead: false
     useDGGTGaussianHead: false
-    frozenDepthHead: true
+    frozenDepthHead: false
+    use0202GaussianHead: false
     min_depth: 1.5
     max_depth: 110.0
     render_conf: false
     conf_threshold: 0.1
-    freeze_module: all
+    freeze_module: patch_embed # all means freeze aggregator; patch_embed means only freeze patch_embed; none means not freeze
     voxelize: true
     intermediate_layer_idx: [4, 11, 17, 23]
     enable_high_conf_supplement: true
@@ -51,15 +52,15 @@ dataset:
       num_target_views: 3
       # min_distance_between_context_views: 32
       # max_distance_between_context_views: 256
-      max_img_per_gpu: 15
+      max_img_per_gpu: 9
     avg_pose: false
     intr_augment: false
     normalize_by_pts3d: false
     rescale_to_1cube: false
 
 optimizer:
-  lr: 3.125e-5 #2.2e-5 # 9.3e-6 imgs:9x2 # 1.25e-5 # 6.25e-6 imgs:12x1 # 2.5e-5 imgs:6x8 # 3.125e-6 imgs:6x1 #1.25e-6 5e-5 #2e-4 and 24 per gpu, 16 gpus
-  warm_up_steps: 2000
+  lr: 5e-6 #2.2e-5 # 9.3e-6 imgs:9x2 # 1.25e-5 # 6.25e-6 imgs:12x1 # 2.5e-5 imgs:6x8 # 3.125e-6 imgs:6x1 #1.25e-6 5e-5 #2e-4 and 24 per gpu, 16 gpus
+  warm_up_steps: 3000
   backbone_lr_multiplier: 0.1 #0.1
 
 data_loader:
@@ -76,8 +77,8 @@ trainer:
   precision: "bf16-mixed" #"32" bf16-mixed
 
 checkpointing:
-  # load: null
-  load: outputs/exp_OmniVGGT_nuScenes_omnivggt_finetune/2026-04-15_21-15-46_work1v2_add_gs_12000/checkpoints/epoch_1-step_10000.ckpt
+  load: null
+  # load: outputs/exp_OmniVGGT_nuScenes_omnivggt_finetune/2026-04-15_21-15-46_work1v2_add_gs_12000/checkpoints/epoch_1-step_10000.ckpt
   log_save_dir: outputs/exp_OmniVGGT_${wandb.name}/${now:%Y-%m-%d_%H-%M-%S}
   flag_gaussian_head: true # 是否读取Gaussian Head的权重
   every_n_train_steps: 5000
@@ -89,7 +90,8 @@ train:
   pose_loss_delta: 1.0
   cxt_depth_weight: 0.0
   weight_pose: 0.0 #10.0
-  weight_depth: 0.0 #1.0 # 1.0
+  weight_depth: 1.0 #1.0 # 1.0
+  weight_depth_norm: 0.5
   weight_normal: 0.0
 
 hydra:

@@ -45,7 +45,8 @@ from src.model.encoder.omnivggt.models.omnivggt import OmniVGGT
 from src.model.encoder.omnivggt.models.omnivggt_aggregator import ZeroAggregator
 from src.model.encoder.omnivggt.heads.camera_head import CameraHead
 from src.model.encoder.omnivggt.heads.dpt_head import DPTHead
-
+### for distill
+from src.model.encoder.vggt.models.vggt import VGGT
 inf = float("inf")
 
 
@@ -92,6 +93,7 @@ class EncoderAnySplatCfg:
     frozenAggregator: bool = False
     frozenGaussianHead: bool = False
     useDGGTGaussianHead: bool = False
+    use0202GaussianHead: bool = False
     frozenDepthHead: bool = False
     useOG_OmniVGGT: bool = False
     export_pt_path: str = 'ckpts/Weights'
@@ -221,7 +223,35 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
         #         for param in module.parameters():
         #             param.requires_grad = False
         #             param.data = param.data.cpu()
+        if self.distill: 
+            # Initialize the model and load the pretrained weights.
+            distill_model = VGGT()
+            # model.load_state_dict(torch.load(ckpt/vggt.pt", map_location=device))
+            # Override only aggregator and depth_head with merged checkpoints.
+            aggregator_ckpt = "checkpoints/recondrive/merged_ckpts/aggregator_merged.ckpt"
+            depth_head_ckpt = "checkpoints/recondrive/merged_ckpts/depth_head.ckpt"
 
+            agg_state = load_ckpt_state_dict(aggregator_ckpt)
+            dep_state = load_ckpt_state_dict(depth_head_ckpt)
+
+            missing_agg, unexpected_agg = distill_model.aggregator.load_state_dict(agg_state, strict=False)
+            missing_dep, unexpected_dep = distill_model.depth_head.load_state_dict(dep_state, strict=False)
+            print(f"distill_model VGGT Loaded aggregator ckpt: {aggregator_ckpt}")
+            print(f"aggregator missing={len(missing_agg)}, unexpected={len(unexpected_agg)}")
+            print(f"distill_model VGGT Loaded depth_head ckpt: {depth_head_ckpt}")
+            print(f"depth_head missing={len(missing_dep)}, unexpected={len(unexpected_dep)}")
+            self.distill_aggregator = copy.deepcopy(distill_model.aggregator.to(torch.bfloat16))
+            self.distill_depth_head = copy.deepcopy(distill_model.depth_head)
+            del agg_state, dep_state, distill_model
+            
+            for module in [
+                self.distill_aggregator,
+                self.distill_depth_head,
+            ]:
+                for param in module.parameters():
+                    param.requires_grad = False
+                    param.data = param.data.cpu()
+        
         if self.freeze_backbone:
             for module in [self.aggregator, self.depth_head]:
                 for param in module.parameters():
@@ -255,6 +285,7 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
 
         self.pose_free = cfg.pose_free
         self.useDGGTGaussianHead = cfg.useDGGTGaussianHead
+        self.use0202GaussianHead = cfg.use0202GaussianHead
         if self.pose_free:
             if self.useDGGTGaussianHead:
                 self.gaussian_adapter = UnifiedGaussianAdapterForDGGT(cfg.gaussian_adapter)
@@ -282,24 +313,24 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
                 features=head_params.feature_dim,
             )
             
-        gs_head_state = load_ckpt_state_dict("checkpoints/merged_0202_epoch5/gaussian_param_head_weights.pth")
-        gs_head_state = strip_prefix_from_state_dict(gs_head_state, "gaussian_param_head.")
-        missing_gs, unexpected_gs = self.gaussian_param_head.load_state_dict(gs_head_state, strict=False)
-        print(f"Loaded gs_head ckpt: checkpoints/merged_0202_epoch5/gaussian_param_head_weights.pth")
-        print(f"gs_head missing={len(missing_gs)}, unexpected={len(unexpected_gs)}")
+        if self.use0202GaussianHead:
+            gs_head_state = load_ckpt_state_dict("checkpoints/merged_0202_epoch5/gaussian_param_head_weights.pth")
+            gs_head_state = strip_prefix_from_state_dict(gs_head_state, "gaussian_param_head.")
+            missing_gs, unexpected_gs = self.gaussian_param_head.load_state_dict(gs_head_state, strict=False)
+            print(f"Loaded gs_head ckpt: checkpoints/merged_0202_epoch5/gaussian_param_head_weights.pth")
+            print(f"gs_head missing={len(missing_gs)}, unexpected={len(unexpected_gs)}")
         
         del model_full
-
-
         
-        print("self.frozenAggregator:", self.frozenAggregator,
+        print(
+            # "self.frozenAggregator:", self.frozenAggregator,
               "self.frozenGaussianHead:", self.frozenGaussianHead,
               "self.frozenDepthHead:", self.frozenDepthHead,
         )
         ### Freeze specific components
-        if self.frozenAggregator:
-            for param in self.aggregator.parameters():
-                param.requires_grad = False
+        # if self.frozenAggregator:
+        #     for param in self.aggregator.parameters():
+        #         param.requires_grad = False
         if self.frozenGaussianHead:
             for param in self.gaussian_param_head.parameters():
                 param.requires_grad = False
@@ -310,7 +341,8 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
 
     ### add pretrained weights loading pretrain AnySplat model
     def usePreTrainedWeights(self, flag: bool = True):
-        print("self.frozenAggregator:", self.frozenAggregator,
+        print(
+            # "self.frozenAggregator:", self.frozenAggregator,
               "self.frozenGaussianHead:", self.frozenGaussianHead,
               "self.frozenDepthHead:", self.frozenDepthHead,
         )
@@ -333,9 +365,9 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
         #         param.requires_grad = False
         #         param.data = param.data.cpu()
                 
-        if self.frozenAggregator:
-            for param in self.aggregator.parameters():
-                param.requires_grad = False
+        # if self.frozenAggregator:
+        #     for param in self.aggregator.parameters():
+        #         param.requires_grad = False
         if self.frozenGaussianHead:
             for param in self.gaussian_param_head.parameters():
                 param.requires_grad = False
@@ -466,6 +498,63 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
         device = image.device
         B, V, _, H, W = image.shape
         distill_infos = {}
+        
+        if self.distill:
+            distill_image = image.clone().detach()
+            for module in [
+                self.distill_aggregator,
+                self.distill_depth_head,
+            ]:
+                for param in module.parameters():
+                    param.data = param.data.to(device, non_blocking=True)
+            
+            with torch.no_grad():    
+                # Process with bfloat16 precision
+                with torch.amp.autocast("cuda", enabled=True, dtype=torch.bfloat16):
+                    distill_aggregated_tokens_list, distill_patch_start_idx = (
+                        self.distill_aggregator(
+                            distill_image,
+                            intermediate_layer_idx=self.cfg.intermediate_layer_idx,
+                        )
+                    )
+
+                # Process with default precision
+                with torch.amp.autocast("cuda", enabled=False):
+                    # Get depth information
+                    distill_depth_map, distill_depth_conf = self.distill_depth_head(
+                        distill_aggregated_tokens_list,
+                        images=distill_image,
+                        patch_start_idx=distill_patch_start_idx,
+                    )            
+
+                # distill_depth_map = torch.nn.functional.sigmoid(torch.log(distill_depth_map))
+                distill_depth_map = torch.sigmoid(torch.log(torch.clamp(distill_depth_map, min=1e-6)))
+                distill_infos["depth_map_norm"] = distill_depth_map
+                
+                min_depth = self.min_depth
+                max_depth = self.max_depth
+                depth_range = max_depth-min_depth
+                distill_depth_map = min_depth + depth_range * distill_depth_map
+                distill_infos["depth_map"] = distill_depth_map
+                
+
+                conf_threshold = torch.quantile(
+                    distill_depth_conf.flatten(2, 3), 0.3, dim=-1, keepdim=True
+                )  # Get threshold for each view
+                conf_mask = distill_depth_conf > conf_threshold.unsqueeze(-1)
+                distill_infos["conf_mask"] = conf_mask
+
+                for module in [
+                    self.distill_aggregator,
+                    self.distill_depth_head,
+                ]:
+                    for param in module.parameters():
+                        param.data = param.data.cpu()
+                # Clean up to save memory
+                del distill_aggregated_tokens_list, distill_patch_start_idx
+                del distill_depth_map, distill_depth_conf
+                torch.cuda.empty_cache()
+                            
         # if self.distill:
         #     distill_image = image.clone().detach()
         #     distill_extrinsics = batch["context"]["extrinsics"].clone().detach()
@@ -600,12 +689,12 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
                 patch_start_idx=patch_start_idx,
             )
 
-            depth_map = torch.nn.functional.sigmoid(torch.log(depth_map))
-
+            depth_map_norm = torch.sigmoid(torch.log(torch.clamp(depth_map, min=1e-6)))
+            
             min_depth = self.min_depth
             max_depth = self.max_depth
             depth_range = max_depth-min_depth
-            depth_map = min_depth + depth_range * depth_map
+            depth_map = min_depth + depth_range * depth_map_norm
 
             pts_all = batchify_unproject_depth_map_to_point_map(
                 depth_map, extrinsic, intrinsic
@@ -631,19 +720,22 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
                 high_conf_mask = depth_conf_detached > high_conf_threshold.unsqueeze(-1)
             else:
                 high_conf_mask = torch.zeros_like(depth_conf_detached, dtype=torch.bool)
+                
             if high_conf_mask.shape != conf_valid_mask.shape:
                 high_conf_mask = high_conf_mask.squeeze(-1)
-            conf_threshold_tmp = torch.quantile(
-                depth_conf_detached.flatten(2, 3), 0.3, dim=-1, keepdim=True
-            )  # Get threshold for each view
-            conf_mask_tmp = depth_conf > conf_threshold_tmp.unsqueeze(-1)
-            distill_infos["conf_mask"] = conf_mask_tmp
-            del depth_conf_detached, conf_threshold_tmp, conf_mask_tmp
             
-            # Store results
-            # distill_infos["pred_pose_enc_list"] = pred_pose_enc_list
-            distill_infos["pts_all"] = pts_all
-            distill_infos["depth_map"] = depth_map
+            if self.distill == False:
+                conf_threshold_tmp = torch.quantile(
+                    depth_conf_detached.flatten(2, 3), 0.3, dim=-1, keepdim=True
+                )  # Get threshold for each view
+                conf_mask_tmp = depth_conf > conf_threshold_tmp.unsqueeze(-1)
+                distill_infos["conf_mask"] = conf_mask_tmp
+                del depth_conf_detached, conf_threshold_tmp, conf_mask_tmp
+                # Store results
+                # distill_infos["pred_pose_enc_list"] = pred_pose_enc_list
+                # distill_infos["pts_all"] = pts_all
+                distill_infos["depth_map"] = depth_map
+                
 
         # dpt style gs_head input format
         if self.useDGGTGaussianHead:
@@ -891,7 +983,7 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
                 extrinsic=torch.cat([extrinsic, extrinsic_padding], dim=2).inverse(), # w2c become c2w
                 intrinsic=intrinsic,
             ),
-            depth_dict=dict(depth=depth_map, conf_valid_mask=conf_valid_mask),
+            depth_dict=dict(depth=depth_map, conf_valid_mask=conf_valid_mask, depth_map_norm=depth_map_norm),
             infos=infos,
             distill_infos=distill_infos,
         )
