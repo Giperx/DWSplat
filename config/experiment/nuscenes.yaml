@@ -20,7 +20,7 @@ model:
     intrinsics_embed_loc: encoder
     intrinsics_embed_type: token
     pretrained_weights: ''
-    voxel_size: 0.12
+    voxel_size: 0.002
     pred_pose: true
     anchor_feat_dim: 128
     gs_prune: false # ablate: opacity loss
@@ -33,7 +33,7 @@ model:
     frozenGaussianHead: false
     useDGGTGaussianHead: false
     frozenDepthHead: false
-    use0202GaussianHead: false
+    use0202GaussianHead: true
     min_depth: 1.5
     max_depth: 110.0
     render_conf: false
@@ -41,7 +41,7 @@ model:
     freeze_module: patch_embed # all means freeze aggregator; patch_embed means only freeze patch_embed; none means not freeze
     voxelize: true
     intermediate_layer_idx: [4, 11, 17, 23]
-    enable_high_conf_supplement: true
+    enable_high_conf_supplement: false
     high_conf_supplement_quantile: 0.8
     
 dataset:
@@ -63,7 +63,8 @@ optimizer:
   # 2e-4 and 24 per gpu, 16 gpus
   # 1gpu, 9imgs, 3e-5    linear scale: 4.6e-6
   # 4gpu, 9imgs, 6e-5    linear scale: 1.8e-5
-  warm_up_steps: 3000
+  # 4gpu, 9imgs, gredient_accum 2, 8.6e-5    linear scale: 3.75e-5
+  warm_up_steps: 2000
   backbone_lr_multiplier: 0.1 #0.1
 
 data_loader:
@@ -93,10 +94,11 @@ train:
   pose_loss_delta: 1.0
   cxt_depth_weight: 0.0
   weight_pose: 0.0 #10.0
-  weight_depth: 1.0 # loss_depth_l1 + loss_depth_gradient
+  weight_depth: 0.0 # loss_depth_l1 + loss_depth_gradient
   weight_depth_l1: 0.1 # gs render depth and distill depth-head metric depth
   weight_depth_gradient: 0.1 # gs render depth and distill depth-head metric depth
-  weight_depth_norm_head: 0.5 # depth-head norm depth adn distill depth-head norm depth
+  weight_depth_norm_head_mse: 0.1 # depth-head norm depth adn distill depth-head norm depth
+  weight_depth_norm_head_gradient: 0.1 # depth-head norm depth adn distill depth-head norm depth
   weight_normal: 0.0
 
 hydra:
@@ -112,7 +114,7 @@ loss:
     weight: 0.05
     conf: false
   depth_consis:
-    weight: 0.1 # 
+    weight: 0.001 # 
     loss_type: MSE
 
 

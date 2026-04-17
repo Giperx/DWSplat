@@ -180,6 +180,7 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
             model_full.aggregator = model_full.aggregator.float()
             self.aggregator = model_full.aggregator.to(torch.bfloat16)
             self.depth_head = model_full.depth_head
+            del model_full
         else:
             export_root = Path(cfg.export_pt_path)
             aggregator_ckpt = export_root / "aggregator_merged.ckpt"
@@ -198,6 +199,7 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
             print(f"aggregator missing={len(missing_agg)}, unexpected={len(unexpected_agg)}")
             print(f"Loaded depth_head ckpt: {depth_head_ckpt}")
             print(f"depth_head missing={len(missing_dep)}, unexpected={len(unexpected_dep)}")
+            del agg_state, dep_state, model_full
 
         self.freeze_backbone = cfg.freeze_backbone
         self.distill = cfg.distill
@@ -320,7 +322,7 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
             print(f"Loaded gs_head ckpt: checkpoints/merged_0202_epoch5/gaussian_param_head_weights.pth")
             print(f"gs_head missing={len(missing_gs)}, unexpected={len(unexpected_gs)}")
         
-        del model_full
+        del gs_head_state
         
         print(
             # "self.frozenAggregator:", self.frozenAggregator,
