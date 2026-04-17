@@ -322,7 +322,7 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
             print(f"Loaded gs_head ckpt: checkpoints/merged_0202_epoch5/gaussian_param_head_weights.pth")
             print(f"gs_head missing={len(missing_gs)}, unexpected={len(unexpected_gs)}")
         
-        del gs_head_state
+            del gs_head_state
         
         print(
             # "self.frozenAggregator:", self.frozenAggregator,
