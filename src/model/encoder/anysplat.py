@@ -531,20 +531,20 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
 
                 # distill_depth_map = torch.nn.functional.sigmoid(torch.log(distill_depth_map))
                 distill_depth_map = torch.sigmoid(torch.log(torch.clamp(distill_depth_map, min=1e-6)))
-                distill_infos["depth_map_norm"] = distill_depth_map
+                distill_infos["depth_map_norm"] = distill_depth_map.detach()
                 
                 min_depth = self.min_depth
                 max_depth = self.max_depth
                 depth_range = max_depth-min_depth
                 distill_depth_map = min_depth + depth_range * distill_depth_map
-                distill_infos["depth_map"] = distill_depth_map
+                distill_infos["depth_map"] = distill_depth_map.detach()
                 
 
                 conf_threshold = torch.quantile(
                     distill_depth_conf.flatten(2, 3), 0.3, dim=-1, keepdim=True
                 )  # Get threshold for each view
                 conf_mask = distill_depth_conf > conf_threshold.unsqueeze(-1)
-                distill_infos["conf_mask"] = conf_mask
+                distill_infos["conf_mask"] = conf_mask.detach()
 
                 for module in [
                     self.distill_aggregator,

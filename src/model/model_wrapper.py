@@ -87,6 +87,9 @@ class TrainCfg:
     print_log_every_n_steps: int
     distiller: str
     distill_max_steps: int
+    distill_warmup_steps: int = 3000
+    distill_warmup_start: float = 0.2
+    distill_warmup_end: float = 1.0
     pose_loss_alpha: float = 1.0
     pose_loss_delta: float = 1.0
     cxt_depth_weight: float = 0.01
@@ -156,6 +159,9 @@ class ModelWrapper(LightningModule):
                 weight_depth_gradient=self.train_cfg.weight_depth_gradient,
                 weight_depth_norm_head_mse=self.train_cfg.weight_depth_norm_head_mse,
                 weight_depth_norm_head_gradient=self.train_cfg.weight_depth_norm_head_gradient,
+                distill_warmup_steps=self.train_cfg.distill_warmup_steps,
+                distill_warmup_start=self.train_cfg.distill_warmup_start,
+                distill_warmup_end=self.train_cfg.distill_warmup_end,
             )
 
         # This is used for testing.
@@ -281,21 +287,28 @@ class ModelWrapper(LightningModule):
 
             if distill_infos is not None:
                 # distill ctx pred_pose & depth & normal
-                loss_distill_list = self.loss_distill(pred_pose_enc_list, output, batch, depth_dict)
+                loss_distill_list = self.loss_distill(
+                    pred_pose_enc_list,
+                    output,
+                    batch,
+                    depth_dict,
+                    self.global_step,
+                )
                 self.log("loss/distill", loss_distill_list['loss_distill'])
+                self.log("loss/distill_scale", loss_distill_list['loss_distill_scale'])
                 # self.log("loss/distill_pose", loss_distill_list['loss_pose'])
-                # self.log("loss/distill_depth", loss_distill_list['loss_depth'])
-                # self.log("loss/distill_depth_norm_head_mse", loss_distill_list['loss_depth_norm_head_mse'])
-                # self.log("loss/distill_depth_norm_head_gradient", loss_distill_list['loss_depth_norm_head_gradient'])
+                self.log("loss/distill_depth", loss_distill_list['loss_depth'])
+                self.log("loss/distill_depth_norm_head_mse", loss_distill_list['loss_depth_norm_head_mse'])
+                self.log("loss/distill_depth_norm_head_gradient", loss_distill_list['loss_depth_norm_head_gradient'])
                 self.log("loss/distill_depth_l1", loss_distill_list['loss_depth_l1'])
                 self.log("loss/distill_depth_gradient", loss_distill_list['loss_depth_gradient'])
                 # self.log("loss/distill_normal", loss_distill_list['loss_normal'])
                 total_loss = total_loss + loss_distill_list['loss_distill']
                 
                 loss_breakdown.append(f"distill={loss_distill_list['loss_distill'].detach().float().item():.6f}")
-                # loss_breakdown.append(f"distill_depth={loss_distill_list['loss_depth'].detach().float().item():.6f}")
-                # loss_breakdown.append(f"distill_depth_l1={loss_distill_list['loss_depth_l1'].detach().float().item():.6f}")
-                # loss_breakdown.append(f"distill_depth_gradient={loss_distill_list['loss_depth_gradient'].detach().float().item():.6f}")
+                loss_breakdown.append(f"distill_depth={loss_distill_list['loss_depth'].detach().float().item():.6f}")
+                loss_breakdown.append(f"distill_depth_l1={loss_distill_list['loss_depth_l1'].detach().float().item():.6f}")
+                loss_breakdown.append(f"distill_depth_gradient={loss_distill_list['loss_depth_gradient'].detach().float().item():.6f}")
                 loss_breakdown.append(f"distill_depth_norm_head_mse={loss_distill_list['loss_depth_norm_head_mse'].detach().float().item():.6f}")
                 loss_breakdown.append(f"distill_depth_norm_head_gradient={loss_distill_list['loss_depth_norm_head_gradient'].detach().float().item():.6f}")
         
