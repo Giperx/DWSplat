@@ -915,7 +915,7 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
         # infos["first_batch_supplement_gs_num"] = first_batch_supplement_gs_num
         # infos["first_batch_total_gs_num"] = first_batch_voxelized_gs_num + first_batch_supplement_gs_num
 
-        if global_step == 0 or ( global_step % self.print_log_every_n_steps == 0):
+        if self.global_rank == 0 and (global_step == 0 or (global_step % self.print_log_every_n_steps == 0)):
             first_batch_total_gs_num = (
                 first_batch_voxelized_gs_num + first_batch_supplement_gs_num
             )
@@ -967,7 +967,7 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
                 f"scales: mean: {gaussians.scales.mean()}, min: {gaussians.scales.min()}, max: {gaussians.scales.max()}"
             )
 
-            print("B:", B, "V:", V, "H:", H, "W:", W)
+            # print("B:", B, "V:", V, "H:", H, "W:", W)
         extrinsic_padding = (
             torch.tensor([0, 0, 0, 1], device=device, dtype=extrinsic.dtype)
             .view(1, 1, 1, 4)

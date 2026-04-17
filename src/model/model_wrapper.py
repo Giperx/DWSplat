@@ -100,6 +100,7 @@ class TrainCfg:
     weight_depth_gradient: float = 0.5
     weight_depth_norm_head_mse: float = 0.5
     weight_depth_norm_head_gradient: float = 0.5
+    weight_depth_scale: float = 0.1
     render_ba: bool = False
     render_ba_after_step: int = 0
 
@@ -159,6 +160,7 @@ class ModelWrapper(LightningModule):
                 weight_depth_gradient=self.train_cfg.weight_depth_gradient,
                 weight_depth_norm_head_mse=self.train_cfg.weight_depth_norm_head_mse,
                 weight_depth_norm_head_gradient=self.train_cfg.weight_depth_norm_head_gradient,
+                weight_depth_scale=self.train_cfg.weight_depth_scale,
                 distill_warmup_steps=self.train_cfg.distill_warmup_steps,
                 distill_warmup_start=self.train_cfg.distill_warmup_start,
                 distill_warmup_end=self.train_cfg.distill_warmup_end,
@@ -302,6 +304,7 @@ class ModelWrapper(LightningModule):
                 self.log("loss/distill_depth_norm_head_gradient", loss_distill_list['loss_depth_norm_head_gradient'])
                 self.log("loss/distill_depth_l1", loss_distill_list['loss_depth_l1'])
                 self.log("loss/distill_depth_gradient", loss_distill_list['loss_depth_gradient'])
+                self.log("loss/distill_depth_scale", loss_distill_list['loss_depth_scale'])
                 # self.log("loss/distill_normal", loss_distill_list['loss_normal'])
                 total_loss = total_loss + loss_distill_list['loss_distill']
                 
@@ -309,6 +312,7 @@ class ModelWrapper(LightningModule):
                 loss_breakdown.append(f"distill_depth={loss_distill_list['loss_depth'].detach().float().item():.6f}")
                 loss_breakdown.append(f"distill_depth_l1={loss_distill_list['loss_depth_l1'].detach().float().item():.6f}")
                 loss_breakdown.append(f"distill_depth_gradient={loss_distill_list['loss_depth_gradient'].detach().float().item():.6f}")
+                loss_breakdown.append(f"distill_depth_scale={loss_distill_list['loss_depth_scale'].detach().float().item():.6f}")
                 loss_breakdown.append(f"distill_depth_norm_head_mse={loss_distill_list['loss_depth_norm_head_mse'].detach().float().item():.6f}")
                 loss_breakdown.append(f"distill_depth_norm_head_gradient={loss_distill_list['loss_depth_norm_head_gradient'].detach().float().item():.6f}")
         

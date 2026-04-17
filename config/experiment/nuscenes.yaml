@@ -74,7 +74,7 @@ data_loader:
     
 trainer:
   max_steps: 120000
-  val_check_interval: 1000
+  val_check_interval: 200
   log_every_n_steps: 20
   print_log_every_n_steps: 20
   num_nodes: 1
@@ -96,13 +96,14 @@ train:
   cxt_depth_weight: 0.0
   weight_pose: 0.0 #10.0
   weight_depth: 1.0 # loss_depth_l1 + loss_depth_gradient
-  weight_depth_l1: 0.05 # gs render depth and distill depth-head metric depth
-  weight_depth_gradient: 0.05 # gs render depth and distill depth-head metric depth
+  weight_depth_l1: 0.02 # gs render depth and distill depth-head metric depth
+  weight_depth_gradient: 0.0 # gs render depth and distill depth-head metric depth
   weight_depth_norm_head_mse: 0.05 # depth-head norm depth adn distill depth-head norm depth
   weight_depth_norm_head_gradient: 0.05 # depth-head norm depth adn distill depth-head norm depth
+  weight_depth_scale: 0.05 # explicit median-scale anchor to prevent scene scale collapse
   weight_normal: 0.0
-  distill_warmup_steps: 2000
-  distill_warmup_start: 0.2
+  distill_warmup_steps: 1000
+  distill_warmup_start: 0.4
   distill_warmup_end: 1.0
 
 hydra:
@@ -118,7 +119,7 @@ loss:
     weight: 0.05
     conf: false
   depth_consis:
-    weight: 0.001 # 
+    weight: 0.0001 # 
     loss_type: MSE
 
 
