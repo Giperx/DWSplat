@@ -20,7 +20,7 @@ model:
     intrinsics_embed_loc: encoder
     intrinsics_embed_type: token
     pretrained_weights: ''
-    voxel_size: 0.12
+    voxel_size: 0.05
     pred_pose: true
     anchor_feat_dim: 128
     gs_prune: false # ablate: opacity loss
@@ -43,20 +43,20 @@ model:
     
 dataset:
   nuscenes:
-    input_image_shape: [252, 448]
+    input_image_shape: [294, 518]
     view_sampler:
       num_context_views: 3 # keep same with numTimes x 3
       num_target_views: 3
       # min_distance_between_context_views: 32
       # max_distance_between_context_views: 256
-      max_img_per_gpu: 24
+      max_img_per_gpu: 15
     avg_pose: false
     intr_augment: false
     normalize_by_pts3d: false
     rescale_to_1cube: false
 
 optimizer:
-  lr: 5e-5 #2.2e-5 # 9.3e-6 imgs:9x2 # 1.25e-5 # 6.25e-6 imgs:12x1 # 2.5e-5 imgs:6x8 # 3.125e-6 imgs:6x1 #1.25e-6 5e-5 #2e-4 and 24 per gpu, 16 gpus
+  lr: 3.5e-5 #2.2e-5 # 9.3e-6 imgs:9x2 # 1.25e-5 # 6.25e-6 imgs:12x1 # 2.5e-5 imgs:6x8 # 3.125e-6 imgs:6x1 #1.25e-6 5e-5 #2e-4 and 24 per gpu, 16 gpus
   warm_up_steps: 2000
   backbone_lr_multiplier: 0.1 #0.1
 
@@ -65,7 +65,7 @@ data_loader:
     batch_size: 4 # not used here
     
 trainer:
-  max_steps: 40000
+  max_steps: 120000
   val_check_interval: 1000
   log_every_n_steps: 50
   num_nodes: 1
