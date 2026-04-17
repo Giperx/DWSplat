@@ -20,7 +20,7 @@ model:
     intrinsics_embed_loc: encoder
     intrinsics_embed_type: token
     pretrained_weights: ''
-    voxel_size: 0.05
+    voxel_size: 0.002
     pred_pose: true
     anchor_feat_dim: 128
     gs_prune: false # ablate: opacity loss
@@ -49,14 +49,14 @@ dataset:
       num_target_views: 3
       # min_distance_between_context_views: 32
       # max_distance_between_context_views: 256
-      max_img_per_gpu: 15
+      max_img_per_gpu: 18
     avg_pose: false
     intr_augment: false
     normalize_by_pts3d: false
     rescale_to_1cube: false
 
 optimizer:
-  lr: 3.5e-5 #2.2e-5 # 9.3e-6 imgs:9x2 # 1.25e-5 # 6.25e-6 imgs:12x1 # 2.5e-5 imgs:6x8 # 3.125e-6 imgs:6x1 #1.25e-6 5e-5 #2e-4 and 24 per gpu, 16 gpus
+  lr: 5e-5 #2.2e-5 # 9.3e-6 imgs:9x2 # 1.25e-5 # 6.25e-6 imgs:12x1 # 2.5e-5 imgs:6x8 # 3.125e-6 imgs:6x1 #1.25e-6 5e-5 #2e-4 and 24 per gpu, 16 gpus
   warm_up_steps: 2000
   backbone_lr_multiplier: 0.1 #0.1
 
@@ -103,7 +103,7 @@ loss:
     weight: 0.05
     conf: false
   depth_consis:
-    weight: 0.1 # 
+    weight: 0.01 # 
     loss_type: MSE
 
 
