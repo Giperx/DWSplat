@@ -915,7 +915,12 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
         # infos["first_batch_supplement_gs_num"] = first_batch_supplement_gs_num
         # infos["first_batch_total_gs_num"] = first_batch_voxelized_gs_num + first_batch_supplement_gs_num
 
-        if self.global_rank == 0 and (global_step == 0 or (global_step % self.print_log_every_n_steps == 0)):
+        is_main_process = (
+            (not torch.distributed.is_available())
+            or (not torch.distributed.is_initialized())
+            or torch.distributed.get_rank() == 0
+        )
+        if is_main_process and (global_step == 0 or (global_step % self.print_log_every_n_steps == 0)):
             first_batch_total_gs_num = (
                 first_batch_voxelized_gs_num + first_batch_supplement_gs_num
             )
