@@ -20,7 +20,7 @@ model:
     intrinsics_embed_loc: encoder
     intrinsics_embed_type: token
     pretrained_weights: ''
-    voxel_size: 0.12
+    voxel_size: 0.002
     pred_pose: true
     anchor_feat_dim: 128
     gs_prune: false # ablate: opacity loss
@@ -33,6 +33,7 @@ model:
     frozenGaussianHead: false
     useDGGTGaussianHead: false
     frozenDepthHead: true
+    use0202GaussianHead: false
     min_depth: 1.5
     max_depth: 110.0
     render_conf: false
@@ -40,7 +41,7 @@ model:
     freeze_module: all
     voxelize: true
     intermediate_layer_idx: [4, 11, 17, 23]
-    enable_high_conf_supplement: true
+    enable_high_conf_supplement: false
     high_conf_supplement_quantile: 0.8
     
 dataset:
@@ -58,8 +59,8 @@ dataset:
     rescale_to_1cube: false
 
 optimizer:
-  lr: 3.125e-5 #2.2e-5 # 9.3e-6 imgs:9x2 # 1.25e-5 # 6.25e-6 imgs:12x1 # 2.5e-5 imgs:6x8 # 3.125e-6 imgs:6x1 #1.25e-6 5e-5 #2e-4 and 24 per gpu, 16 gpus
-  warm_up_steps: 2000
+  lr: 4e-5 #2.2e-5 # 9.3e-6 imgs:9x2 # 1.25e-5 # 6.25e-6 imgs:12x1 # 2.5e-5 imgs:6x8 # 3.125e-6 imgs:6x1 #1.25e-6 5e-5 #2e-4 and 24 per gpu, 16 gpus
+  warm_up_steps: 1000
   backbone_lr_multiplier: 0.1 #0.1
 
 data_loader:
@@ -67,17 +68,17 @@ data_loader:
     batch_size: 4 # not used here
     
 trainer:
-  max_steps: 120000
+  max_steps: 45000
   val_check_interval: 1000
   log_every_n_steps: 50
-  print_log_every_n_steps: 25
+  print_log_every_n_steps: 50
   num_nodes: 1
   accumulate_grad_batches: 1
   precision: "bf16-mixed" #"32" bf16-mixed
 
 checkpointing:
-  # load: null
-  load: outputs/exp_OmniVGGT_nuScenes_omnivggt_finetune/2026-04-15_21-15-46_work1v2_add_gs_12000/checkpoints/epoch_1-step_10000.ckpt
+  load: null
+  # load: outputs/exp_OmniVGGT_nuScenes_omnivggt_finetune/2026-04-17_21-49-57_work1v2_vol0.002_epoch7/checkpoints/epoch_3-step_25000.ckpt
   log_save_dir: outputs/exp_OmniVGGT_${wandb.name}/${now:%Y-%m-%d_%H-%M-%S}
   flag_gaussian_head: true # 是否读取Gaussian Head的权重
   every_n_train_steps: 5000
@@ -105,7 +106,7 @@ loss:
     weight: 0.05
     conf: false
   depth_consis:
-    weight: 0.1 # 
+    weight: 0.01 # 
     loss_type: MSE
 
 

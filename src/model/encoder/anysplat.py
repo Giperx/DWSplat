@@ -93,6 +93,7 @@ class EncoderAnySplatCfg:
     frozenGaussianHead: bool = False
     useDGGTGaussianHead: bool = False
     frozenDepthHead: bool = False
+    use0202GaussianHead: bool = False
     useOG_OmniVGGT: bool = False
     export_pt_path: str = 'ckpts/Weights'
     min_depth: float = 1.5
@@ -178,6 +179,7 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
             model_full.aggregator = model_full.aggregator.float()
             self.aggregator = model_full.aggregator.to(torch.bfloat16)
             self.depth_head = model_full.depth_head
+            del model_full
         else:
             export_root = Path(cfg.export_pt_path)
             aggregator_ckpt = export_root / "aggregator_merged.ckpt"
@@ -196,12 +198,14 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
             print(f"aggregator missing={len(missing_agg)}, unexpected={len(unexpected_agg)}")
             print(f"Loaded depth_head ckpt: {depth_head_ckpt}")
             print(f"depth_head missing={len(missing_dep)}, unexpected={len(unexpected_dep)}")
-
+            del dep_state, agg_state, model_full
+            
         self.freeze_backbone = cfg.freeze_backbone
         self.distill = cfg.distill
         self.frozenAggregator = cfg.frozenAggregator
         self.frozenGaussianHead = cfg.frozenGaussianHead
         self.frozenDepthHead = cfg.frozenDepthHead
+        self.use0202GaussianHead = cfg.use0202GaussianHead
         self.pred_pose = cfg.pred_pose
 
         self.min_depth = cfg.min_depth
@@ -282,13 +286,14 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
                 features=head_params.feature_dim,
             )
             
-        gs_head_state = load_ckpt_state_dict("checkpoints/merged_0202_epoch5/gaussian_param_head_weights.pth")
-        gs_head_state = strip_prefix_from_state_dict(gs_head_state, "gaussian_param_head.")
-        missing_gs, unexpected_gs = self.gaussian_param_head.load_state_dict(gs_head_state, strict=False)
-        print(f"Loaded gs_head ckpt: checkpoints/merged_0202_epoch5/gaussian_param_head_weights.pth")
-        print(f"gs_head missing={len(missing_gs)}, unexpected={len(unexpected_gs)}")
-        
-        del model_full
+        if cfg.use0202GaussianHead:            
+            gs_head_state = load_ckpt_state_dict("checkpoints/merged_0202_epoch5/gaussian_param_head_weights.pth")
+            gs_head_state = strip_prefix_from_state_dict(gs_head_state, "gaussian_param_head.")
+            missing_gs, unexpected_gs = self.gaussian_param_head.load_state_dict(gs_head_state, strict=False)
+            print(f"Loaded gs_head ckpt: checkpoints/merged_0202_epoch5/gaussian_param_head_weights.pth")
+            print(f"gs_head missing={len(missing_gs)}, unexpected={len(unexpected_gs)}")
+            
+            del gs_head_state
 
 
         
