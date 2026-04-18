@@ -20,7 +20,7 @@ from src.model.model.anysplat import AnySplat
 from src.model.encoder.vggt.utils.geometry import closed_form_inverse_se3
 # CUDA_VISIBLE_DEVICES=4 python bf16_BatchInferDWSplatNuScenes260408.py
 # --- Batch Settings ---
-BATCH_SIZE = 6
+BATCH_SIZE = 8
 
 # --- Image Dimensions (Must match training/loader logic) ---
 # Based on nuScenes_dataset_loader.py
