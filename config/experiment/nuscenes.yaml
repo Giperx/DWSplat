@@ -59,7 +59,7 @@ dataset:
     rescale_to_1cube: false
 
 optimizer:
-  lr: 3e-5 
+  lr: 5e-5 
   # 2e-4 and 24 per gpu, 16 gpus
   # 1gpu, 9imgs, 3e-5    linear scale: 4.6e-6
   # 4gpu, 9imgs, 6e-5    linear scale: 1.8e-5
@@ -73,7 +73,7 @@ data_loader:
     batch_size: 4 # not used here
     
 trainer:
-  max_steps: 120000
+  max_steps: 80000
   val_check_interval: 200
   log_every_n_steps: 20
   print_log_every_n_steps: 20

@@ -243,6 +243,12 @@ class ModelWrapper(LightningModule):
         # scene_scale = infos["scene_scale"]
         self.log("train/scene_scale", infos["scene_scale"])
         self.log("train/voxelize_ratio", infos["voxelize_ratio"])
+        if distill_infos is not None and "scene_scale" in distill_infos:
+            self.log("train/distill_scene_scale", distill_infos["scene_scale"])
+            self.log(
+                "train/scene_scale_ratio",
+                infos["scene_scale"] / (distill_infos["scene_scale"] + 1e-8),
+            )
 
         # Compute metrics.
         assert target_gt.shape[1] == output.color.shape[1]
@@ -315,6 +321,12 @@ class ModelWrapper(LightningModule):
                 loss_breakdown.append(f"distill_depth_scale={loss_distill_list['loss_depth_scale'].detach().float().item():.6f}")
                 loss_breakdown.append(f"distill_depth_norm_head_mse={loss_distill_list['loss_depth_norm_head_mse'].detach().float().item():.6f}")
                 loss_breakdown.append(f"distill_depth_norm_head_gradient={loss_distill_list['loss_depth_norm_head_gradient'].detach().float().item():.6f}")
+
+        if distill_infos is not None and "scene_scale" in distill_infos:
+            loss_breakdown.append(f"distill_scene_scale={distill_infos['scene_scale'].detach().float().item():.6f}")
+            loss_breakdown.append(
+                f"scene_scale_ratio={(infos['scene_scale'] / (distill_infos['scene_scale'] + 1e-8)).detach().float().item():.6f}"
+            )
         
         self.log("loss/total", total_loss)
         # print(f"total_loss: {total_loss}")

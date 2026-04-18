@@ -538,6 +538,12 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
                 depth_range = max_depth-min_depth
                 distill_depth_map = min_depth + depth_range * distill_depth_map
                 distill_infos["depth_map"] = distill_depth_map.detach()
+
+                distill_pts_all = batchify_unproject_depth_map_to_point_map(
+                    distill_depth_map, batch["context"]["extrinsics"], batch["context"]["intrinsics"]
+                )
+                distill_scene_scale = distill_pts_all.flatten(2, 3).norm(dim=-1).mean().clip(min=1e-8)
+                distill_infos["scene_scale"] = distill_scene_scale.detach()
                 
 
                 conf_threshold = torch.quantile(
