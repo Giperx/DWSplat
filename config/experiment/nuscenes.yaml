@@ -65,7 +65,7 @@ data_loader:
     batch_size: 4 # not used here
     
 trainer:
-  max_steps: 120000
+  max_steps: 50000
   val_check_interval: 1000
   log_every_n_steps: 50
   num_nodes: 1
@@ -103,7 +103,7 @@ loss:
     weight: 0.05
     conf: false
   depth_consis:
-    weight: 0.001 # 
+    weight: 0.01 # 
     loss_type: MSE
 
 

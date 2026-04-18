@@ -99,7 +99,7 @@ class AnySplat(nn.Module, huggingface_hub.PyTorchModelHubMixin):
         batch: BatchedExample
     ):
         self.encoder.distill = False
-        encoder_output = self.encoder(batch, global_step=0, visualization_dump=None)
+        encoder_output = self.encoder(batch, global_step=1, visualization_dump=None)
         gaussians, pred_context_pose = encoder_output.gaussians, encoder_output.pred_context_pose
         return gaussians, pred_context_pose
     

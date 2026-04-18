@@ -770,7 +770,7 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
                 f"scales: mean: {gaussians.scales.mean()}, min: {gaussians.scales.min()}, max: {gaussians.scales.max()}"
             )
 
-            print("B:", B, "V:", V, "H:", H, "W:", W)
+            # print("B:", B, "V:", V, "H:", H, "W:", W)
         extrinsic_padding = (
             torch.tensor([0, 0, 0, 1], device=device, dtype=extrinsic.dtype)
             .view(1, 1, 1, 4)

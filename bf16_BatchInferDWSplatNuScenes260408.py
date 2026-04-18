@@ -18,16 +18,16 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Assuming these paths exist based on your provided file context
 from src.model.model.anysplat import AnySplat 
 from src.model.encoder.vggt.utils.geometry import closed_form_inverse_se3
-# CUDA_VISIBLE_DEVICES=0 python BatchInferDWSplatNuScenes260205.py
+# CUDA_VISIBLE_DEVICES=4 python bf16_BatchInferDWSplatNuScenes260408.py
 # --- Batch Settings ---
-BATCH_SIZE = 3
+BATCH_SIZE = 6
 
 # --- Image Dimensions (Must match training/loader logic) ---
 # Based on nuScenes_dataset_loader.py
-TARGET_HEIGHT = 252 # 294 252
-TARGET_WIDTH = 448 # 518 448
-RENDER_H = 252  # 294 252     # Height for final rendering (if different from input)
-WIDE_W = 896 # 1036 896       # Width for wide-angle rendering
+TARGET_HEIGHT = 294 # 294 252
+TARGET_WIDTH = 518 # 518 448
+RENDER_H = 294  # 294 252     # Height for final rendering (if different from input)
+WIDE_W = 1036 # 1036 896       # Width for wide-angle rendering
 
 # --- Fusion Settings ---
 ENABLE_FUSION = False
@@ -35,12 +35,12 @@ BLEND_EDGE_WIDTH = 100
 FUSION_METHOD = 'two_band' # 'simple' or 'two_band'
 
 # --- Paths ---
-PRETRAINED_PATH = "Weights/260203SingleFramesVol0002Epoch5Iter30000/weights" # 260203SingleFramesVol0002Epoch3Iter20000 260203SingleFramesVol0002Epoch5Iter30000
-DATASET_ROOT = "datasets/nuscenes/processed_10Hz/trainval" # UPDATE THIS 
-VAL_LIST_PATH = "nuScenes_Val2.txt" # UPDATE THIS
-
+PRETRAINED_PATH = "outputs/exp_OmniVGGT_nuScenes_omnivggt_finetune/2026-04-17_21-49-57_work1v2_vol0.002_epoch7/checkpoints/epoch_5-step_40000/" # 260203SingleFramesVol0002Epoch3Iter20000 260203SingleFramesVol0002Epoch5Iter30000
+DATASET_ROOT = "datasets/nuscenes/processed_10Hz/trainval2" # UPDATE THIS 
+VAL_LIST_PATH = "datasets/nuscenes/processed_10Hz/trainval2/nuScenes_Val.txt" # UPDATE THIS
+FLAG_bf16 = True # Whether to use bfloat16 for inference (requires compatible GPU and PyTorch version)
 # Output path generation
-SAVE_ROOT_BASE = "./renders_val_v2omni_v1wights_0.05vol_448_bf16"
+SAVE_ROOT_BASE = f"./renders_val_work1v2_omni_e5s4w_vol0.002_{TARGET_WIDTH}px{'_bf16' if FLAG_bf16 else ''}"
 if ENABLE_FUSION:
     folder_suffix = f"fusion_{FUSION_METHOD}_{BLEND_EDGE_WIDTH}px"
 else:
@@ -94,12 +94,12 @@ def read_intrinsics(scene_path, cam_id, target_h, target_w):
 
     # Normalize to 0-1 (for model input)
     norm_intr = intr.copy()
-    # norm_intr[0, 0] /= float(target_w)
-    # norm_intr[1, 1] /= float(target_h)
-    # norm_intr[0, 2] /= float(target_w)
-    # norm_intr[1, 2] /= float(target_h)
+    norm_intr[0, 0] /= float(target_w)
+    norm_intr[1, 1] /= float(target_h)
+    norm_intr[0, 2] /= float(target_w)
+    norm_intr[1, 2] /= float(target_h)
 
-    return torch.from_numpy(norm_intr)
+    return torch.from_numpy(norm_intr), torch.from_numpy(intr) # Return both normalized and original intrinsics as tensors
 
 def read_extrinsics(scene_path, timestep, cam_id):
     """Read 4x4 cam2world extrinsics"""
@@ -203,11 +203,7 @@ def main():
         b_extrinsics = []
         b_context_extrinsics = []
         b_intrinsics = []
-        b_masks = []
-        b_cam_idxs = []
-        b_depth_idxs = []
-        b_depths = []
-        
+        b_norm_intrinsics = []
         valid_batch_tasks = []
 
         # Load Data for Batch
@@ -218,7 +214,7 @@ def main():
                 cams = task['cam_indices']
                 
                 # Per-view lists
-                v_imgs, v_exts, v_ints = [], [], []
+                v_imgs, v_exts, v_ints, norm_v_ints = [], [], [], []
                 
                 for cid in cams:
                     # Load Image
@@ -228,13 +224,14 @@ def main():
                     ext = read_extrinsics(scene_path, fid, cid)
                     v_exts.append(ext)
                     # Load Intrinsics
-                    intr = read_intrinsics(scene_path, cid, TARGET_HEIGHT, TARGET_WIDTH)
+                    norm_intr, intr = read_intrinsics(scene_path, cid, TARGET_HEIGHT, TARGET_WIDTH)
                     v_ints.append(intr)
-
+                    norm_v_ints.append(norm_intr)
                 # Stack views
                 v_imgs = torch.stack(v_imgs) # [3, 3, H, W]
                 v_exts = torch.stack(v_exts) # [3, 4, 4]
                 v_ints = torch.stack(v_ints) # [3, 3, 3]
+                norm_v_ints = torch.stack(norm_v_ints) # [3, 3, 3]
 
                 # --- Coordinate Normalization (Relative Pose) ---
                 # Match loader logic: Make 1st context view (idx 0) the origin
@@ -245,25 +242,16 @@ def main():
                 
                 # Apply SE3 Inverse for model (converts 4x4 -> 3x4 effectively in many utils)
                 # Using the imported util
-                v_exts_final = closed_form_inverse_se3(v_exts)
+                v_exts_final = closed_form_inverse_se3(v_exts) # get w2c
                 # v_exts_final = v_exts_final[:, :3, :] # Ensure 3x4 if util returned 4x4, usually it returns [B, V, 3, 4]
-
-                # Construct dummy fields required by TypeDefinition
-                # v_masks = torch.zeros((3, TARGET_HEIGHT, TARGET_WIDTH), dtype=torch.bool)
-                # v_depths = torch.zeros((3, TARGET_HEIGHT, TARGET_WIDTH), dtype=torch.float32)
-                # v_cam_idxs_ts = torch.tensor([0, 1, 2], dtype=torch.int64) # Always 0,1,2 for group
-                # v_depth_idxs_ts = torch.full((3,), -1, dtype=torch.int64)
 
                 # Append to Batch Lists
                 b_images.append(v_imgs)
                 b_extrinsics.append(v_exts) # Keep 4x4 for decoder
                 b_context_extrinsics.append(v_exts_final[:, :3, :]) # 3x4 for encoder
                 b_intrinsics.append(v_ints)
-                # b_masks.append(v_masks)
-                # b_depths.append(v_depths)
-                # b_cam_idxs.append(v_cam_idxs_ts)
-                # b_depth_idxs.append(v_depth_idxs_ts)
-                
+                b_norm_intrinsics.append(norm_v_ints)
+
                 # Cache for fusion
                 if ENABLE_FUSION:
                     task['input_images_cpu'] = v_imgs.clone()
@@ -284,10 +272,6 @@ def main():
                 "image": torch.stack(b_images).to(device),              # [B, 3, 3, H, W]
                 "extrinsics": torch.stack(b_context_extrinsics).to(device),     # [B, 3, 3, 4] for encoder
                 "intrinsics": torch.stack(b_intrinsics).to(device),     # [B, 3, 3, 3]
-                # "mask_omnivggt": torch.stack(b_masks).to(device),       # [B, 3, H, W]
-                # "depth": torch.stack(b_depths).to(device),              # [B, 3, H, W]
-                # "camera_indices": torch.stack(b_cam_idxs).to(device),   # [B, 3]
-                # "depth_indices": torch.stack(b_depth_idxs).to(device),  # [B, 3]
             },
             # "target" is usually not needed for pure inference if we manually decode, 
             # or we can alias context if the model code requires it.
@@ -313,12 +297,16 @@ def main():
             # 1. Run Encoder
             # The prompt says: encoder_output = self.encoder(batch)
             # We assume model.encoder returns Gaussians
-            with torch.amp.autocast("cuda", enabled=True, dtype=torch.bfloat16): # dtype=torch.bfloat16
-                # 遍历batch_input，确保都是bfloat16类型
-                # for key in batch_input:
-                #     if isinstance(batch_input[key], torch.Tensor) and batch_input[key].dtype == torch.float32:
-                #         batch_input[key] = batch_input[key].to(torch.bfloat16)
-                gaussians, pred_context_pose = model.inference(batch_input)
+            if FLAG_bf16:
+                with torch.amp.autocast("cuda", enabled=True, dtype=torch.bfloat16): # dtype=torch.bfloat16
+                    # 遍历batch_input，确保都是bfloat16类型
+                    # for key in batch_input:
+                    #     if isinstance(batch_input[key], torch.Tensor) and batch_input[key].dtype == torch.float32:
+                    #         batch_input[key] = batch_input[key].to(torch.bfloat16)
+                    gaussians, _ = model.inference(batch_input)
+            else:
+                with torch.amp.autocast("cuda", enabled=False):
+                    gaussians, _ = model.inference(batch_input)                
             
             # 2. Run Decoder / Rendering
             # We need to construct render intrinsics. 
@@ -327,8 +315,10 @@ def main():
             
             # Clone intrinsics from batch (these are 0-1 normalized)
             # render_intrinsics = pred_context_pose['intrinsic'].clone()
-            render_intrinsics = pred_context_pose['intrinsic'].clone()
-            
+            # render_intrinsics = pred_context_pose['intrinsic'].clone()
+            # render_intrinsics = batch_input["context"]["intrinsics"].clone()
+            render_intrinsics = torch.stack(b_norm_intrinsics).to(device).clone() # [B, 3, 3, 3], we will adjust fx for wide rendering
+            render_extrinsics = torch.stack(b_extrinsics).to(device)
             # If rendering at WIDE_W, we need to adjust FOV or Aspect? 
             # batch_render_nuscenes.py did: new_intrinsics[..., 0, 0] *= (TARGET_W / WIDE_W)
             # NOTE: If we want a wider FOV output, we usually scale the focal length DOWN (zoom out) 
@@ -350,10 +340,11 @@ def main():
 
             # Forward Decoder
             # Note: Decoder needs EXTRINSICS. We use the 4x4 ones.
+            # need c2w ext and norm intr
             outputs = model.decoder.forward(
                 gaussians,
-                pred_context_pose['extrinsic'],
-                render_intrinsics.float(),
+                render_extrinsics,
+                render_intrinsics,
                 t_near,
                 t_far,
                 (RENDER_H, WIDE_W), # Output resolution
