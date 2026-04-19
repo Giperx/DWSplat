@@ -12,7 +12,7 @@ from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 from torchmetrics.functional import peak_signal_noise_ratio, structural_similarity_index_measure
 from tqdm import tqdm
 
-# CUDA_VISIBLE_DEVICES=0 python batchCalcuMetricsSuccessNuScenes260202.py
+# CUDA_VISIBLE_DEVICES=4 python BatchCaculateMetrics260418.py
 
 # ================= 项目路径设置 =================
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -36,9 +36,9 @@ SELECTED_CAMERAS = [0, 5] # 仅计算这些相机的指标 (空列表 [] 代表�
 
 # 路径配置
 DATASET_ROOT = "datasets/nuscenes/processed_10Hz/trainval2"
-VAL_LIST_PATH = "nuScenes_Val.txt"
-SAVE_ROOT = "renders_val_omni/260203SingleFramesVol0002Epoch5Iter30000/render_only"
-RESULT_TXT_PATH = os.path.join(SAVE_ROOT, f"260205stitching_metrics_report_cams_{'_'.join(map(str, SELECTED_CAMERAS)) if SELECTED_CAMERAS else 'all'}.txt")
+VAL_LIST_PATH = "datasets/nuscenes/processed_10Hz/trainval2/nuScenes_Val.txt"
+SAVE_ROOT = "renders_val_work1v2_omni_e5s4w_vol0.002_518px_bf16/epoch_5-step_40000/render_only_bf16"
+RESULT_TXT_PATH = os.path.join(SAVE_ROOT, f"260419_metrics_report_cams_{'_'.join(map(str, SELECTED_CAMERAS)) if SELECTED_CAMERAS else 'all'}.txt")
 
 # ================= 统计类 =================
 
