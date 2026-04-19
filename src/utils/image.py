@@ -184,7 +184,7 @@ def process_image(img_path):
     img_tensor = torchvision.transforms.ToTensor()(img) * 2.0 - 1.0 # [-1, 1]
     return img_tensor
 
-def process_image_nuscenes(img_path):
+def process_image_nuscenes(img_path, normalize=False):
     img = Image.open(img_path)
     if img.mode == 'RGBA':
         # Convert RGBA to RGB by removing alpha channel
@@ -209,5 +209,8 @@ def process_image_nuscenes(img_path):
     # 插值到448x252
     # img = img.resize((448, 252), Image.BICUBIC)
     img = img.resize((518, 294), Image.BICUBIC)
-    img_tensor = torchvision.transforms.ToTensor()(img) * 2.0 - 1.0 # [-1, 1]
+    if normalize == False:
+        img_tensor = torchvision.transforms.ToTensor()(img) * 2.0 - 1.0 # [-1, 1]
+    else:
+        img_tensor = torchvision.transforms.ToTensor()(img)
     return img_tensor

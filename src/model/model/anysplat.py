@@ -126,9 +126,14 @@ class AnySplat(nn.Module, huggingface_hub.PyTorchModelHubMixin):
             # new_pred_all_intrinsic = pred_context_pose["intrinsic"].clone()
             # 2. 计算宽度比例
             width_scale = w / new_width
-            # 3. 只修改归一化内参的 fx 部分
-            # new_pred_all_intrinsic[..., 0, 0] 是 fx_norm
+            # 3. 修改归一化内参的 fx / cx：保持 wide FOV，同时让中心裁剪后和原始宽度对齐。
+            #    cx_wide = crop_offset_norm + width_scale * cx_normal
+            #    crop_offset_norm = (1 - width_scale) / 2
             pred_context_pose["intrinsic"][..., 0, 0] = pred_context_pose["intrinsic"][..., 0, 0] * width_scale
+            crop_offset_norm = (1.0 - width_scale) * 0.5
+            pred_context_pose["intrinsic"][..., 0, 2] = (
+                crop_offset_norm + width_scale * pred_context_pose["intrinsic"][..., 0, 2]
+            )
             w = new_width
             # print("intrinsic_newCalculate:", intrinsic_newCalculate)
             # print("new_pred_all_intrinsic:", new_pred_all_intrinsic)

@@ -28,7 +28,7 @@ TARGET_HEIGHT = 294 # 294 252
 TARGET_WIDTH = 518 # 518 448
 RENDER_H = 294  # 294 252     # Height for final rendering (if different from input)
 WIDE_W = 1036 # 1036 896       # Width for wide-angle rendering
-
+RENDER_WIDTH = True # If True, render at RENDER_H x WIDE_W; if False, render at TARGET_HEIGHT x TARGET_WIDTH
 # --- Fusion Settings ---
 ENABLE_FUSION = False
 BLEND_EDGE_WIDTH = 100
@@ -40,12 +40,12 @@ DATASET_ROOT = "datasets/nuscenes/processed_10Hz/trainval2" # UPDATE THIS
 VAL_LIST_PATH = "datasets/nuscenes/processed_10Hz/trainval2/nuScenes_Val.txt" # UPDATE THIS
 FLAG_bf16 = True # Whether to use bfloat16 for inference (requires compatible GPU and PyTorch version)
 # Output path generation
-SAVE_ROOT_BASE = f"./renders_val_work1v2_omni_e5s4w_vol0.002_{TARGET_WIDTH}px{'_bf16' if FLAG_bf16 else ''}"
+SAVE_ROOT_BASE = f"./renders_val{'' if RENDER_WIDTH else '_ogwidth'}_work1v2_omni_e5s4w_vol0.002_{TARGET_WIDTH}px{'_bf16' if FLAG_bf16 else ''}"
 if ENABLE_FUSION:
     folder_suffix = f"fusion_{FUSION_METHOD}_{BLEND_EDGE_WIDTH}px"
 else:
-    folder_suffix = "render_only_bf16"
-
+    folder_suffix = f"render_only{'_bf16' if FLAG_bf16 else ''}"
+print("SAVE_ROOT_BASE:", SAVE_ROOT_BASE)
 SAVE_ROOT = os.path.join(SAVE_ROOT_BASE, PRETRAINED_PATH.split('/')[-2], folder_suffix)
 
 # ================= Helper Functions: Data Loading =================
@@ -66,7 +66,7 @@ def get_scene_frames(scene_path):
     pattern = re.compile(r"^(.*)_0\.(jpg|png|jpeg)$", re.IGNORECASE)
     for f in sorted(os.listdir(img_dir)):
         match = pattern.match(f)
-        if match:
+        if match:   
             frame_ids.append(match.group(1))
     return sorted(frame_ids)
 
@@ -326,8 +326,16 @@ def main():
             # If we simply increase resolution (W -> WIDE_W) but keep intrinsics normalized, 
             # we render the SAME view at higher res.
             # To render a "Wide" view from a crop-trained model, usually we adjust focal length.
-            width_scale = TARGET_WIDTH / WIDE_W # e.g. 0.5
-            render_intrinsics[..., 0, 0] *= width_scale # Scale fx
+            if RENDER_WIDTH:
+                width_scale = TARGET_WIDTH / WIDE_W
+                render_intrinsics[..., 0, 0] *= width_scale # Scale normalized fx for wide FOV.
+                # Keep center-cropped wide render aligned with normal render when cx != 0.5:
+                # cx_wide = crop_offset_norm + width_scale * cx_normal,
+                # where crop_offset_norm = (1 - width_scale) / 2.
+                crop_offset_norm = (1.0 - width_scale) * 0.5
+                render_intrinsics[..., 0, 2] = (
+                    crop_offset_norm + width_scale * render_intrinsics[..., 0, 2]
+                )
             # render_intrinsics[..., 0, 2] *= width_scale # Scale cx? 
             # Usually cx stays at 0.5 (center) in normalized coords.
             # If cx was 0.5 * TARGET_W, now it is 0.5 * WIDE_W. Normalized value is still ~0.5.
@@ -344,10 +352,10 @@ def main():
             outputs = model.decoder.forward(
                 gaussians,
                 render_extrinsics,
-                render_intrinsics,
+                render_intrinsics.float(),
                 t_near,
                 t_far,
-                (RENDER_H, WIDE_W), # Output resolution
+                (RENDER_H, WIDE_W) if RENDER_WIDTH else (RENDER_H, TARGET_WIDTH)
             )
             
             # Output: [B, V, C, H, W]
@@ -367,7 +375,7 @@ def main():
                     pred_img = group_render[v] # [3, H, W]
                     
                     # A. Save Wide Render
-                    wide_name = f"{task['frame_id']}_{cam_idx}_wide.jpg"
+                    wide_name = f"{task['frame_id']}_{cam_idx}{'_wide' if RENDER_WIDTH else ''}.jpg"
                     save_image(pred_img, os.path.join(task['save_dir'], wide_name))
                     
                     # B. Fusion (Only for first view in group usually, per old script)

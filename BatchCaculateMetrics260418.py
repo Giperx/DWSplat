@@ -8,6 +8,7 @@ import math
 from pathlib import Path
 from PIL import Image
 import torchvision.transforms as transforms
+from torchvision.utils import save_image
 from torchmetrics.image.lpip import LearnedPerceptualImagePatchSimilarity
 from torchmetrics.functional import peak_signal_noise_ratio, structural_similarity_index_measure
 from tqdm import tqdm
@@ -33,13 +34,16 @@ FAILURE_RATIO = 0.5    # 某一侧白色像素占比超过50%则判定失败
 # 功能开关
 EVAL_FUSION = False        # True: 计算Fusion指标; False: 仅计算Original指标
 SELECTED_CAMERAS = [0, 5] # 仅计算这些相机的指标 (空列表 [] 代表计算所有相机 0-5)
+DEBUG_VISUALIZE = True     # 在计算指标前导出 gt / pred / diff 便于人工检查
+DEBUG_VIS_MAX_SAMPLES = 24 # 最多导出多少个成功样本，避免磁盘输出过多
 
 # 路径配置
 DATASET_ROOT = "datasets/nuscenes/processed_10Hz/trainval2"
 VAL_LIST_PATH = "datasets/nuscenes/processed_10Hz/trainval2/nuScenes_Val.txt"
 SAVE_ROOT = "renders_val_work1v2_omni_e5s4w_vol0.002_518px_bf16/epoch_5-step_40000/render_only_bf16"
 RESULT_TXT_PATH = os.path.join(SAVE_ROOT, f"260419_metrics_report_cams_{'_'.join(map(str, SELECTED_CAMERAS)) if SELECTED_CAMERAS else 'all'}.txt")
-
+DEBUG_VIS_ROOT = os.path.join(SAVE_ROOT, "metrics_debug")
+DEBUG_VIS = os.path.join(DEBUG_VIS_ROOT, "debug_samples")
 # ================= 统计类 =================
 
 class MetricTracker:
@@ -183,6 +187,21 @@ def should_process_cam(cam_idx):
         return True
     return cam_idx in SELECTED_CAMERAS
 
+def save_metric_debug_pair(gt_img, pred_img, out_dir, prefix):
+    os.makedirs(out_dir, exist_ok=True)
+
+    gt_img = gt_img.detach().cpu().clamp(0, 1)
+    pred_img = pred_img.detach().cpu().clamp(0, 1)
+    diff_img = (gt_img - pred_img).abs().clamp(0, 1)
+
+    save_image(gt_img, os.path.join(out_dir, f"{prefix}_gt.png"))
+    save_image(pred_img, os.path.join(out_dir, f"{prefix}_pred.png"))
+    save_image(diff_img, os.path.join(out_dir, f"{prefix}_diff.png"))
+    save_image(
+        torch.cat([gt_img, pred_img, diff_img], dim=2),
+        os.path.join(out_dir, f"{prefix}_gt_pred_diff.png"),
+    )
+
 def check_white_region_batch(img_batch, left_region, right_region):
     """
     批量检查图像的左右拼接区域白色像素比例
@@ -238,6 +257,10 @@ def main():
     print(f"Center region: [{start_x}, {start_x + TARGET_W})")
     print(f"Left stitching region: {left_region}")
     print(f"Right stitching region: {right_region}")
+    if DEBUG_VISUALIZE:
+        os.makedirs(DEBUG_VIS_ROOT, exist_ok=True)
+        print(f"Metric debug visualizations will be saved to: {DEBUG_VIS_ROOT}")
+    debug_vis_count = 0
 
     # === 全局统计器 ===
     def create_stats_dict():
@@ -404,6 +427,29 @@ def main():
                 pred_fusion_list.append(pred_crop_f)
             
             success_tasks.append(task)
+
+            if DEBUG_VISUALIZE and debug_vis_count < DEBUG_VIS_MAX_SAMPLES:
+                debug_scene_dir = os.path.join(
+                    DEBUG_VIS_ROOT,
+                    task['scene_id'],
+                    task['grp_key'],
+                    f"cam{task['cam_idx']}",
+                )
+                debug_prefix = f"{task['frame_id']}_{task['cam_idx']}"
+                save_metric_debug_pair(
+                    gt_img,
+                    pred_crop.squeeze(0),
+                    debug_scene_dir,
+                    debug_prefix,
+                )
+                debug_vis_count += 1
+                if EVAL_FUSION:
+                    save_metric_debug_pair(
+                        gt_img,
+                        pred_crop_f,
+                        os.path.join(debug_scene_dir, "fusion"),
+                        debug_prefix,
+                    )
         
         if not gt_list:
             continue
