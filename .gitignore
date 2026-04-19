@@ -218,3 +218,4 @@ nuScenes_Val2.txt
 src/dataset/nuscenes_mask
 gsplat-1.5.3+pt22cu118-cp310-cp310-linux_x86_64.whl
 split_ckpt.py
+tmp*.*
