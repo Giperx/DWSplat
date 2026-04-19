@@ -70,14 +70,80 @@ def huber_loss(x, y, delta=1.0):
     return flag * 0.5 * diff**2 + (1 - flag) * delta * (abs_diff - 0.5 * delta)
 
 class DistillLoss(nn.Module):
-    def __init__(self, delta=1.0, gamma=0.6, weight_pose=1.0, weight_depth=1.0, weight_normal=1.0):
+    def __init__(self, delta=1.0, gamma=0.6, weight_pose=1.0, weight_depth=1.0, weight_normal=1.0, weight_depth_l1=0.5, weight_depth_gradient=0.5, weight_depth_norm_head_mse=0.5, weight_depth_norm_head_gradient=0.5, weight_depth_scale=0.1, distill_warmup_steps=3000, distill_warmup_start=0.2, distill_warmup_end=1.0):
         super().__init__()
         self.delta = delta
         self.gamma = gamma
         self.weight_pose = weight_pose
         self.weight_depth = weight_depth
         self.weight_normal = weight_normal
+        self.weight_depth_l1 = weight_depth_l1
+        self.weight_depth_gradient = weight_depth_gradient
+        self.weight_depth_norm_head_mse = weight_depth_norm_head_mse
+        self.weight_depth_norm_head_gradient = weight_depth_norm_head_gradient
+        self.weight_depth_scale = weight_depth_scale
+        self.distill_warmup_steps = distill_warmup_steps
+        self.distill_warmup_start = distill_warmup_start
+        self.distill_warmup_end = distill_warmup_end
 
+    def get_distill_warmup_scale(self, global_step, device):
+        if self.distill_warmup_steps <= 0:
+            return torch.tensor(self.distill_warmup_end, device=device)
+
+        progress = min(max(global_step / self.distill_warmup_steps, 0.0), 1.0)
+        scale = self.distill_warmup_start + progress * (
+            self.distill_warmup_end - self.distill_warmup_start
+        )
+        return torch.tensor(scale, device=device)
+
+    def gradient_loss(self, gs_depth, target_depth, target_valid_mask):
+        diff = gs_depth - target_depth
+
+        grad_x_diff = diff[:, :, :, 1:] - diff[:, :, :, :-1]
+        grad_y_diff = diff[:, :, 1:, :] - diff[:, :, :-1, :]
+
+        mask_x = target_valid_mask[:, :, :, 1:] * target_valid_mask[:, :, :, :-1]
+        mask_y = target_valid_mask[:, :, 1:, :] * target_valid_mask[:, :, :-1, :]
+
+        grad_x_diff = grad_x_diff * mask_x
+        grad_y_diff = grad_y_diff * mask_y
+
+        grad_x_diff = grad_x_diff.clamp(min=-100, max=100)
+        grad_y_diff = grad_y_diff.clamp(min=-100, max=100)
+
+        loss_x = grad_x_diff.abs().sum()
+        loss_y = grad_y_diff.abs().sum()
+        num_valid = mask_x.sum() + mask_y.sum()
+
+        if num_valid == 0:
+            gradient_loss = 0
+        else:
+            gradient_loss = (loss_x + loss_y) / (num_valid + 1e-6)
+        
+        return gradient_loss
+
+    def align_mask_to_ref(self, mask, ref):
+        if ref.ndim == 5 and ref.shape[-1] == 1:
+            ref = ref.squeeze(-1)
+        if mask.ndim == ref.ndim + 1 and mask.shape[-1] == 1:
+            mask = mask.squeeze(-1)
+        if mask.ndim + 1 == ref.ndim and ref.shape[-1] == 1:
+            ref = ref.squeeze(-1)
+        if mask.ndim == ref.ndim and mask.shape[-2:] == (ref.shape[-1], ref.shape[-2]):
+            mask = mask.transpose(-1, -2)
+        if mask.shape != ref.shape:
+            raise ValueError(f"Mask shape {mask.shape} does not match reference shape {ref.shape}")
+        return mask.bool()
+
+    def scale_anchor_loss(self, pred_depth, target_depth, target_valid_mask):
+        if target_valid_mask.sum() == 0:
+            return pred_depth.new_tensor(0.0)
+        pred_sel = pred_depth[target_valid_mask]
+        target_sel = target_depth[target_valid_mask]
+        pred_med = pred_sel.median()
+        target_med = target_sel.median().clamp_min(1e-6)
+        return (pred_med - target_med).abs() / target_med
+    
     def camera_loss_single(self, cur_pred_pose_enc, gt_pose_encoding, loss_type="l1"):
         if loss_type == "l1":
             loss_T = (cur_pred_pose_enc[..., :3] - gt_pose_encoding[..., :3]).abs()
@@ -108,44 +174,82 @@ class DistillLoss(nn.Module):
         
         return loss_T, loss_R, loss_fl
 
-    def forward(self, distill_infos, pred_pose_enc_list, prediction, batch):
+    def forward(self, pred_pose_enc_list, prediction, batch, depth_dict, global_step=0):
         loss_pose = 0.0
 
-        if pred_pose_enc_list is not None:
-            num_predictions = len(pred_pose_enc_list)
-            pesudo_gt_pose_enc = distill_infos['pred_pose_enc_list']
-            for i in range(num_predictions):
-                i_weight = self.gamma ** (num_predictions - i - 1)
-                cur_pred_pose_enc = pred_pose_enc_list[i]
-                cur_pesudo_gt_pose_enc = pesudo_gt_pose_enc[i]
-                loss_pose += i_weight * huber_loss(cur_pred_pose_enc, cur_pesudo_gt_pose_enc).mean()
-            loss_pose = loss_pose / num_predictions
-            loss_pose = torch.nan_to_num(loss_pose, nan=0.0, posinf=0.0, neginf=0.0)
+        # if pred_pose_enc_list is not None:
+        #     num_predictions = len(pred_pose_enc_list)
+        #     pesudo_gt_pose_enc = depth_dict['distill_infos']['pred_pose_enc_list']
+        #     for i in range(num_predictions):
+        #         i_weight = self.gamma ** (num_predictions - i - 1)
+        #         cur_pred_pose_enc = pred_pose_enc_list[i]
+        #         cur_pesudo_gt_pose_enc = pesudo_gt_pose_enc[i]
+        #         loss_pose += i_weight * huber_loss(cur_pred_pose_enc, cur_pesudo_gt_pose_enc).mean()
+        #     loss_pose = loss_pose / num_predictions
+        #     loss_pose = torch.nan_to_num(loss_pose, nan=0.0, posinf=0.0, neginf=0.0)
         
-        pred_depth = prediction.depth.flatten(0, 1)
-        pesudo_gt_depth = distill_infos['depth_map'].flatten(0, 1).squeeze(-1)
-        conf_mask = distill_infos['conf_mask'].flatten(0, 1)
-
+        pred_depth = prediction.depth
+        pesudo_gt_depth = depth_dict['distill_infos']['depth_map'].squeeze(-1)
+        conf_mask = depth_dict['distill_infos']['conf_mask']
         if batch['context']['valid_mask'].sum() > 0:
-            conf_mask = batch['context']['valid_mask'].flatten(0, 1)
+            conf_mask = batch['context']['valid_mask']
+        conf_mask = self.align_mask_to_ref(conf_mask, pred_depth)
 
-        loss_depth = F.mse_loss(pred_depth[conf_mask], pesudo_gt_depth[conf_mask], reduction='none').mean()
-
-        render_normal = get_normal_map(pred_depth, batch["context"]["intrinsics"].flatten(0, 1))
-        pred_normal = get_normal_map(pesudo_gt_depth, batch["context"]["intrinsics"].flatten(0, 1))
-       
-        alpha1_loss = (1 - (render_normal[conf_mask] * pred_normal[conf_mask]).sum(-1)).mean()
-        alpha2_loss = F.l1_loss(render_normal[conf_mask], pred_normal[conf_mask], reduction='mean')
-        loss_normal = (alpha1_loss + alpha2_loss) / 2
+        distill_scale = self.get_distill_warmup_scale(global_step, pred_depth.device)
+            
+        depth_loss_l1 = (
+            torch.abs(pred_depth[conf_mask] - pesudo_gt_depth[conf_mask]).mean()
+        ) * self.weight_depth_l1 * self.weight_depth * distill_scale
+        depth_loss_gradient = (
+            self.gradient_loss(pred_depth, pesudo_gt_depth, conf_mask)
+        ) * self.weight_depth_gradient * self.weight_depth * distill_scale
+        depth_loss_scale = (
+            self.scale_anchor_loss(pred_depth, pesudo_gt_depth, conf_mask)
+        ) * self.weight_depth_scale * self.weight_depth * distill_scale
+        loss_depth = depth_loss_l1 + depth_loss_gradient + depth_loss_scale
         
-        loss_distill = loss_pose * self.weight_pose + loss_depth * self.weight_depth + loss_normal * self.weight_normal
+        pred_depth =pred_depth.flatten(0, 1)
+        pesudo_gt_depth = pesudo_gt_depth.flatten(0, 1)
+        # conf_mask = conf_mask.flatten(0, 1)
+
+        # loss_depth = F.mse_loss(pred_depth[conf_mask], pesudo_gt_depth[conf_mask], reduction='none').mean()
+      
+        pred_depth_from_head = depth_dict['depth_map_norm']
+        pesudo_gt_depth_from_head = depth_dict['distill_infos']['depth_map_norm']
+        if pred_depth_from_head.ndim == 5 and pred_depth_from_head.shape[-1] == 1:
+            pred_depth_from_head = pred_depth_from_head.squeeze(-1)
+        if pesudo_gt_depth_from_head.ndim == 5 and pesudo_gt_depth_from_head.shape[-1] == 1:
+            pesudo_gt_depth_from_head = pesudo_gt_depth_from_head.squeeze(-1)
+        conf_mask_norm = self.align_mask_to_ref(conf_mask, pred_depth_from_head)
+        # print("shape_pred_depth_from_head:", pred_depth_from_head.shape, "shape_pesudo_gt_depth_from_head:", pesudo_gt_depth_from_head.shape, "shape_conf_mask:", conf_mask.shape)
+        loss_depth_norm_head_gradient = (
+            self.gradient_loss(pred_depth_from_head, pesudo_gt_depth_from_head, conf_mask_norm)
+        ) * self.weight_depth_norm_head_gradient
+        loss_depth_norm_head_mse = (
+            F.mse_loss(pred_depth_from_head[conf_mask_norm], pesudo_gt_depth_from_head[conf_mask_norm], reduction='none').mean()
+        ) * self.weight_depth_norm_head_mse
+        
+        # render_normal = get_normal_map(pred_depth, batch["context"]["intrinsics"].flatten(0, 1))
+        # pred_normal = get_normal_map(pesudo_gt_depth, batch["context"]["intrinsics"].flatten(0, 1))
+       
+        # alpha1_loss = (1 - (render_normal[conf_mask] * pred_normal[conf_mask]).sum(-1)).mean()
+        # alpha2_loss = F.l1_loss(render_normal[conf_mask], pred_normal[conf_mask], reduction='mean')
+        # loss_normal = (alpha1_loss + alpha2_loss) / 2
+        # loss_pose = loss_pose * self.weight_pose
+        loss_distill = loss_pose + loss_depth + loss_depth_norm_head_mse + loss_depth_norm_head_gradient
         loss_distill = torch.nan_to_num(loss_distill, nan=0.0, posinf=0.0, neginf=0.0)
         
         loss_dict = {
             "loss_distill": loss_distill,
-            "loss_pose": loss_pose * self.weight_pose,
-            "loss_depth": loss_depth * self.weight_depth,
-            "loss_normal": loss_normal * self.weight_normal
+            "loss_distill_scale": distill_scale,
+            # "loss_pose": loss_pose * self.weight_pose,
+            "loss_depth": loss_depth,
+            "loss_depth_norm_head_mse": loss_depth_norm_head_mse,
+            "loss_depth_norm_head_gradient": loss_depth_norm_head_gradient,
+            "loss_depth_l1": depth_loss_l1,
+            "loss_depth_gradient": depth_loss_gradient,
+            "loss_depth_scale": depth_loss_scale,
+            # "loss_normal": loss_normal * self.weight_normal
         }
 
         return loss_dict

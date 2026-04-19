@@ -87,12 +87,20 @@ class TrainCfg:
     print_log_every_n_steps: int
     distiller: str
     distill_max_steps: int
+    distill_warmup_steps: int = 3000
+    distill_warmup_start: float = 0.2
+    distill_warmup_end: float = 1.0
     pose_loss_alpha: float = 1.0
     pose_loss_delta: float = 1.0
     cxt_depth_weight: float = 0.01
     weight_pose: float = 1.0
     weight_depth: float = 1.0
     weight_normal: float = 1.0
+    weight_depth_l1: float = 0.5
+    weight_depth_gradient: float = 0.5
+    weight_depth_norm_head_mse: float = 0.5
+    weight_depth_norm_head_gradient: float = 0.5
+    weight_depth_scale: float = 0.1
     render_ba: bool = False
     render_ba_after_step: int = 0
 
@@ -147,7 +155,15 @@ class ModelWrapper(LightningModule):
                 delta=self.train_cfg.pose_loss_delta,
                 weight_pose=self.train_cfg.weight_pose,
                 weight_depth=self.train_cfg.weight_depth,
-                weight_normal=self.train_cfg.weight_normal
+                weight_normal=self.train_cfg.weight_normal,
+                weight_depth_l1=self.train_cfg.weight_depth_l1,
+                weight_depth_gradient=self.train_cfg.weight_depth_gradient,
+                weight_depth_norm_head_mse=self.train_cfg.weight_depth_norm_head_mse,
+                weight_depth_norm_head_gradient=self.train_cfg.weight_depth_norm_head_gradient,
+                weight_depth_scale=self.train_cfg.weight_depth_scale,
+                distill_warmup_steps=self.train_cfg.distill_warmup_steps,
+                distill_warmup_start=self.train_cfg.distill_warmup_start,
+                distill_warmup_end=self.train_cfg.distill_warmup_end,
             )
 
         # This is used for testing.
@@ -227,6 +243,12 @@ class ModelWrapper(LightningModule):
         # scene_scale = infos["scene_scale"]
         self.log("train/scene_scale", infos["scene_scale"])
         self.log("train/voxelize_ratio", infos["voxelize_ratio"])
+        if self.model.encoder.distill and distill_infos is not None and "scene_scale" in distill_infos:
+            self.log("train/distill_scene_scale", distill_infos["scene_scale"])
+            self.log(
+                "train/scene_scale_ratio",
+                infos["scene_scale"] / (distill_infos["scene_scale"] + 1e-8),
+            )
 
         # Compute metrics.
         assert target_gt.shape[1] == output.color.shape[1]
@@ -271,21 +293,47 @@ class ModelWrapper(LightningModule):
             #     self.log("loss/ctx_depth", loss_depth)
             #     total_loss = total_loss + loss_depth
 
-            # if distill_infos is not None:
-            #     # distill ctx pred_pose & depth & normal
-            #     loss_distill_list = self.loss_distill(distill_infos, pred_pose_enc_list, output, batch)
-            #     self.log("loss/distill", loss_distill_list['loss_distill'])
-            #     self.log("loss/distill_pose", loss_distill_list['loss_pose'])
-            #     self.log("loss/distill_depth", loss_distill_list['loss_depth'])
-            #     self.log("loss/distill_normal", loss_distill_list['loss_normal'])
-            #     total_loss = total_loss + loss_distill_list['loss_distill']
+            if self.model.encoder.distill:
+                # distill ctx pred_pose & depth & normal
+                loss_distill_list = self.loss_distill(
+                    pred_pose_enc_list,
+                    output,
+                    batch,
+                    depth_dict,
+                    self.global_step,
+                )
+                self.log("loss/distill", loss_distill_list['loss_distill'])
+                self.log("loss/distill_scale", loss_distill_list['loss_distill_scale'])
+                # self.log("loss/distill_pose", loss_distill_list['loss_pose'])
+                self.log("loss/distill_depth", loss_distill_list['loss_depth'])
+                self.log("loss/distill_depth_norm_head_mse", loss_distill_list['loss_depth_norm_head_mse'])
+                self.log("loss/distill_depth_norm_head_gradient", loss_distill_list['loss_depth_norm_head_gradient'])
+                self.log("loss/distill_depth_l1", loss_distill_list['loss_depth_l1'])
+                self.log("loss/distill_depth_gradient", loss_distill_list['loss_depth_gradient'])
+                self.log("loss/distill_depth_scale", loss_distill_list['loss_depth_scale'])
+                # self.log("loss/distill_normal", loss_distill_list['loss_normal'])
+                total_loss = total_loss + loss_distill_list['loss_distill']
+                
+                loss_breakdown.append(f"distill={loss_distill_list['loss_distill'].detach().float().item():.6f}")
+                loss_breakdown.append(f"distill_depth={loss_distill_list['loss_depth'].detach().float().item():.6f}")
+                loss_breakdown.append(f"distill_depth_l1={loss_distill_list['loss_depth_l1'].detach().float().item():.6f}")
+                loss_breakdown.append(f"distill_depth_gradient={loss_distill_list['loss_depth_gradient'].detach().float().item():.6f}")
+                loss_breakdown.append(f"distill_depth_scale={loss_distill_list['loss_depth_scale'].detach().float().item():.6f}")
+                loss_breakdown.append(f"distill_depth_norm_head_mse={loss_distill_list['loss_depth_norm_head_mse'].detach().float().item():.6f}")
+                loss_breakdown.append(f"distill_depth_norm_head_gradient={loss_distill_list['loss_depth_norm_head_gradient'].detach().float().item():.6f}")
+
+        if self.model.encoder.distill and distill_infos is not None and "scene_scale" in distill_infos:
+            loss_breakdown.append(f"distill_scene_scale={distill_infos['scene_scale'].detach().float().item():.6f}")
+            loss_breakdown.append(
+                f"scene_scale_ratio={(infos['scene_scale'] / (distill_infos['scene_scale'] + 1e-8)).detach().float().item():.6f}"
+            )
         
         self.log("loss/total", total_loss)
         # print(f"total_loss: {total_loss}")
 
         # Skip batch if loss is too high after certain step
-        SKIP_AFTER_STEP = 3000  
-        LOSS_THRESHOLD = 0.2
+        SKIP_AFTER_STEP = 1000 
+        LOSS_THRESHOLD = 2
         if self.global_step > SKIP_AFTER_STEP and total_loss > LOSS_THRESHOLD:
             print(f"Skipping batch with high loss ({total_loss:.6f}) at step {self.global_step} on Rank {self.global_rank}")
             # set to a really small number
@@ -921,6 +969,8 @@ class ModelWrapper(LightningModule):
         for name, param in self.named_parameters():
             if not param.requires_grad:
                 continue
+            
+            print(f'Training parameter: {name}')
             
             if "gaussian_param_head" in name or "interm" in name:
                 new_params.append(param)

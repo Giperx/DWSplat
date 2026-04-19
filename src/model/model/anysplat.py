@@ -21,11 +21,12 @@ class AnySplat(nn.Module, huggingface_hub.PyTorchModelHubMixin):
         self,
         encoder_cfg: EncoderAnySplatCfg,
         decoder_cfg: DecoderSplattingCUDACfg,
+        print_log_every_n_steps: int,
     ):  
         super(AnySplat, self).__init__()
         self.encoder_cfg = encoder_cfg
         self.decoder_cfg = decoder_cfg
-        self.build_encoder(encoder_cfg)
+        self.build_encoder(encoder_cfg, print_log_every_n_steps)
         self.build_decoder(decoder_cfg)
 
     def convert_nested_config(self, cfg_dict: dict, target_class: type):
@@ -85,9 +86,10 @@ class AnySplat(nn.Module, huggingface_hub.PyTorchModelHubMixin):
         
         return self.convert_config_recursively(encoder_cfg, conversion_map)
 
-    def build_encoder(self, encoder_cfg: EncoderAnySplatCfg):
+    def build_encoder(self, encoder_cfg: EncoderAnySplatCfg, print_log_every_n_steps: int):
         # Convert nested configurations using the helper method
         encoder_cfg = self.convert_encoder_config(encoder_cfg)
+        encoder_cfg.print_log_every_n_steps = print_log_every_n_steps
         self.encoder = EncoderAnySplat(encoder_cfg)
 
     def build_decoder(self, decoder_cfg: DecoderSplattingCUDACfg):

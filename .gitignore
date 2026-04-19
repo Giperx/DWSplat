@@ -221,3 +221,5 @@ split_ckpt.py
 tmp_*
 tmp*.md
 tmp*.txt
+pytorch3d/
+*.whl
