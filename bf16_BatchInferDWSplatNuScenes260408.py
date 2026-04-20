@@ -35,12 +35,12 @@ BLEND_EDGE_WIDTH = 100
 FUSION_METHOD = 'two_band' # 'simple' or 'two_band'
 
 # --- Paths ---
-PRETRAINED_PATH = "outputs/exp_OmniVGGT_nuScenes_omnivggt_finetune/2026-04-17_21-49-57_work1v2_vol0.002_epoch7/checkpoints/epoch_5-step_40000/" # 260203SingleFramesVol0002Epoch3Iter20000 260203SingleFramesVol0002Epoch5Iter30000
+PRETRAINED_PATH = "outputs/exp_OmniVGGT_nuScenes_omnivggt_finetune/2026-04-17_21-49-57_work1v2_vol0.002_epoch7/checkpoints/epoch_7-step_55000/" # 260203SingleFramesVol0002Epoch3Iter20000 260203SingleFramesVol0002Epoch5Iter30000
 DATASET_ROOT = "datasets/nuscenes/processed_10Hz/trainval2" # UPDATE THIS 
 VAL_LIST_PATH = "datasets/nuscenes/processed_10Hz/trainval2/nuScenes_Val.txt" # UPDATE THIS
 FLAG_bf16 = True # Whether to use bfloat16 for inference (requires compatible GPU and PyTorch version)
 # Output path generation
-SAVE_ROOT_BASE = f"./renders_val{'' if RENDER_WIDTH else '_ogwidth'}_work1v2_omni_e5s4w_vol0.002_{TARGET_WIDTH}px{'_bf16' if FLAG_bf16 else ''}"
+SAVE_ROOT_BASE = f"./renders_val{'' if RENDER_WIDTH else '_ogwidth'}_work1v2_omni_e7s5w5_vol0.002_{TARGET_WIDTH}px{'_bf16' if FLAG_bf16 else ''}"
 if ENABLE_FUSION:
     folder_suffix = f"fusion_{FUSION_METHOD}_{BLEND_EDGE_WIDTH}px"
 else:

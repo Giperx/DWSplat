@@ -28,17 +28,17 @@ model:
     freeze_backbone: false # means freeze aggregator and depth head
     useOG_OmniVGGT: true
     export_pt_path: 'checkpoints/merged_ckpts_00'
-    distill: true
-    frozenAggregator: false # not used
+    distill: false
+    frozenAggregator: true # not used
     frozenGaussianHead: false
     useDGGTGaussianHead: false
-    frozenDepthHead: false
+    frozenDepthHead: true
     use0202GaussianHead: false
     min_depth: 1.5
     max_depth: 110.0
     render_conf: false
     conf_threshold: 0.1
-    freeze_module: patch_embed # all means freeze aggregator; patch_embed means only freeze patch_embed; none means not freeze
+    freeze_module: all # all means freeze aggregator; patch_embed means only freeze patch_embed; none means not freeze
     voxelize: true
     intermediate_layer_idx: [4, 11, 17, 23]
     enable_high_conf_supplement: false

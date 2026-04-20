@@ -21,7 +21,7 @@ from src.utils.image import process_image_nuscenes
 
 # ================= 配置区域 =================
 # [核心修改] 批处理大小
-BATCH_SIZE = 64  # 建议设大一点 (16-64)
+BATCH_SIZE = 16  # 建议设大一点 (16-64)
 
 RENDER_H = 294
 TARGET_W = 518     # 裁剪目标宽度
@@ -41,7 +41,7 @@ DEBUG_VIS_MAX_SAMPLES = 24 # 最多导出多少个成功样本，避免磁盘输
 DATASET_ROOT = "datasets/nuscenes/processed_10Hz/trainval2"
 VAL_LIST_PATH = "datasets/nuscenes/processed_10Hz/trainval2/nuScenes_Val.txt"
 SAVE_ROOT = "renders_val_work1v2_omni_e5s4w_vol0.002_518px_bf16/epoch_5-step_40000/render_only_bf16"
-RESULT_TXT_PATH = os.path.join(SAVE_ROOT, f"260419_metrics_report_cams_{'_'.join(map(str, SELECTED_CAMERAS)) if SELECTED_CAMERAS else 'all'}.txt")
+RESULT_TXT_PATH = os.path.join(SAVE_ROOT, f"metrics_report_cams_{'_'.join(map(str, SELECTED_CAMERAS)) if SELECTED_CAMERAS else 'all'}.txt")
 DEBUG_VIS_ROOT = os.path.join(SAVE_ROOT, "metrics_debug")
 DEBUG_VIS = os.path.join(DEBUG_VIS_ROOT, "debug_samples")
 # ================= 统计类 =================

@@ -7,7 +7,7 @@ from typing import Literal
 import hydra
 import torch
 from jaxtyping import install_import_hook
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from lightning import Trainer
 
 import os
@@ -51,7 +51,16 @@ def evaluate(cfg_dict: DictConfig):
                             {list[DatasetCfgWrapper]: separate_dataset_cfg_wrappers},)
     set_cfg(cfg_dict)
     torch.manual_seed(cfg.seed)
-    model = AnySplat(cfg.model.encoder, cfg.model.decoder)
+    print_log_every_n_steps = OmegaConf.select(
+        cfg_dict,
+        "train.print_log_every_n_steps",
+        default=OmegaConf.select(cfg_dict, "trainer.log_every_n_steps", default=50),
+    )
+    model = AnySplat(
+        cfg.model.encoder,
+        cfg.model.decoder,
+        int(print_log_every_n_steps),
+    )
     ckpt_weights = torch.load(cfg.checkpointing.load, map_location='cpu')['state_dict']
     # remove the prefix "encoder.", need to judge if is at start of key
     ckpt_weights = {k[8:] if k.startswith("encoder.") else k: v for k, v in ckpt_weights.items()}
