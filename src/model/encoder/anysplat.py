@@ -4,7 +4,7 @@ import copy
 import os
 import sys
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Literal, Optional
 from safetensors.torch import load_file
@@ -114,6 +114,11 @@ class EncoderAnySplatCfg:
         "global+frame",
         "None",
     ] = "None"
+    use_lora_aggregator: bool = False
+    lora_layer_names: List[str] = field(default_factory=lambda: ["qkv", "proj", "fc1", "fc2"])
+    lora_rank: int = 8
+    lora_alpha: int = 32
+    lora_dropout: float = 0.05
     distill: bool = False
     render_conf: bool = False
     opacity_conf: bool = False
@@ -161,6 +166,95 @@ def strip_prefix_from_state_dict(state_dict: dict, prefix: str) -> dict:
     return stripped_state_dict
 
 
+class LoRALinear(nn.Module):
+    def __init__(
+        self,
+        linear_layer: nn.Linear,
+        rank: int = 8,
+        alpha: int = 32,
+        dropout: float = 0.0,
+    ) -> None:
+        super().__init__()
+        if rank <= 0:
+            raise ValueError(f"LoRA rank must be > 0, got {rank}")
+
+        self.linear = linear_layer
+        layer_kwargs = {
+            "device": linear_layer.weight.device,
+            "dtype": linear_layer.weight.dtype,
+        }
+        self.lora_down = nn.Linear(linear_layer.in_features, rank, bias=False, **layer_kwargs)
+        self.lora_up = nn.Linear(rank, linear_layer.out_features, bias=False, **layer_kwargs)
+        self.dropout = nn.Dropout(dropout) if dropout > 0 else nn.Identity()
+
+        nn.init.kaiming_uniform_(self.lora_down.weight, a=5**0.5)
+        nn.init.zeros_(self.lora_up.weight)
+
+        self.scaling = alpha / rank
+
+        self.linear.weight.requires_grad = False
+        if self.linear.bias is not None:
+            self.linear.bias.requires_grad = False
+
+    def forward(self, x: Tensor) -> Tensor:
+        orig_out = self.linear(x)
+        lora_out = self.lora_up(self.dropout(self.lora_down(x)))
+        return orig_out + lora_out * self.scaling
+
+    def merge_weights(self) -> Tensor:
+        merged_weight = self.linear.weight.data + self.scaling * (
+            self.lora_up.weight @ self.lora_down.weight
+        )
+        return merged_weight
+
+
+def apply_lora(
+    model: nn.Module,
+    layer_names: Optional[List[str]] = None,
+    rank: int = 8,
+    alpha: int = 32,
+    dropout: float = 0.0,
+) -> nn.Module:
+    if layer_names is None:
+        layer_names = []
+        for name, module in model.named_modules():
+            if isinstance(module, nn.Linear):
+                layer_names.append(name)
+
+    def _apply(module: nn.Module, prefix: str = "") -> None:
+        for name, child in module.named_children():
+            full_name = f"{prefix}.{name}" if prefix else name
+            should_replace = any(key in full_name for key in layer_names)
+
+            if should_replace and isinstance(child, nn.Linear):
+                setattr(module, name, LoRALinear(child, rank, alpha, dropout))
+            else:
+                _apply(child, full_name)
+
+    _apply(model)
+    return model
+
+
+def set_lora_trainable_only(module: nn.Module) -> tuple[int, int]:
+    total_trainable = 0
+    lora_trainable = 0
+    for param in module.parameters():
+        param.requires_grad = False
+    for submodule in module.modules():
+        if isinstance(submodule, LoRALinear):
+            for param in submodule.lora_down.parameters():
+                param.requires_grad = True
+                lora_trainable += param.numel()
+            for param in submodule.lora_up.parameters():
+                param.requires_grad = True
+                lora_trainable += param.numel()
+
+    for param in module.parameters():
+        if param.requires_grad:
+            total_trainable += param.numel()
+    return lora_trainable, total_trainable
+
+
 class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
     backbone: nn.Module
     gaussian_adapter: GaussianAdapter
@@ -200,6 +294,15 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
             print(f"Loaded depth_head ckpt: {depth_head_ckpt}")
             print(f"depth_head missing={len(missing_dep)}, unexpected={len(unexpected_dep)}")
             del agg_state, dep_state, model_full
+
+        if cfg.use_lora_aggregator:
+            self.aggregator = apply_lora(
+                self.aggregator,
+                layer_names=cfg.lora_layer_names,
+                rank=cfg.lora_rank,
+                alpha=cfg.lora_alpha,
+                dropout=cfg.lora_dropout,
+            )
 
         self.freeze_backbone = cfg.freeze_backbone
         self.distill = cfg.distill
@@ -258,6 +361,15 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
             for module in [self.aggregator, self.depth_head]:
                 for param in module.parameters():
                     param.requires_grad = False
+        elif cfg.use_lora_aggregator:
+            lora_trainable, total_trainable = set_lora_trainable_only(self.aggregator)
+            print(
+                "LoRA enabled for aggregator:",
+                f"layers={cfg.lora_layer_names}, rank={cfg.lora_rank}, alpha={cfg.lora_alpha}, dropout={cfg.lora_dropout}",
+            )
+            print(
+                f"Aggregator trainable params (LoRA only): {lora_trainable} / {total_trainable}"
+            )
         else:
             # aggregator freeze
             freeze_module = self.cfg.freeze_module

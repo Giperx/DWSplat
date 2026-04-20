@@ -35,6 +35,13 @@ scale_align: false
 enable_high_conf_supplement: true
 high_conf_supplement_quantile: 0.7
 
+# LoRA fine-tuning for aggregator.
+use_lora_aggregator: false
+lora_layer_names: [qkv, proj, fc1, fc2]
+lora_rank: 8
+lora_alpha: 32
+lora_dropout: 0.05
+
 voxel_size: 0.001
 n_offsets: 2
 anchor_feat_dim: 83 # 32

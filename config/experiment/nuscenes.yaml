@@ -7,7 +7,7 @@ defaults:
   - override /loss: [mse, lpips, depth_consis] # ablate: opacity loss
 
 wandb:
-  project: anysplat_04_sup_gs_distill_recon
+  project: anysplat_04_sup_gs_Lora_distill_recon
   name: nuScenes_omnivggt_finetune
   tags: [nuScenes, 294x518]
   mode: disabled # online offline disabled
@@ -26,19 +26,20 @@ model:
     gs_prune: false # ablate: opacity loss
     pred_head_type: depth
     freeze_backbone: false # means freeze aggregator and depth head
+    use_lora_aggregator: true # only when freeze_backbone is false, this flag is effective
     useOG_OmniVGGT: true
     export_pt_path: 'checkpoints/merged_ckpts_00'
-    distill: false
+    distill: true
     frozenAggregator: true # not used
     frozenGaussianHead: false
     useDGGTGaussianHead: false
-    frozenDepthHead: true
+    frozenDepthHead: false
     use0202GaussianHead: false
     min_depth: 1.5
     max_depth: 110.0
     render_conf: false
     conf_threshold: 0.1
-    freeze_module: all # all means freeze aggregator; patch_embed means only freeze patch_embed; none means not freeze
+    freeze_module: all # only when freeze_backbone and use_lora_aggregator is false, this flag is effective; patch_embed means only freeze patch_embed; none means not freeze
     voxelize: true
     intermediate_layer_idx: [4, 11, 17, 23]
     enable_high_conf_supplement: false
@@ -74,7 +75,7 @@ data_loader:
     
 trainer:
   max_steps: 80000
-  val_check_interval: 200
+  val_check_interval: 1000
   log_every_n_steps: 20
   print_log_every_n_steps: 20
   num_nodes: 1
