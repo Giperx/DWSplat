@@ -93,7 +93,8 @@ class EncoderAnySplatCfg:
     frozenAggregator: bool = False
     frozenGaussianHead: bool = False
     useDGGTGaussianHead: bool = False
-    use0202GaussianHead: bool = False
+    NotUsePretrainedGaussianHead: bool = True
+    gshead_pt_path: str = 'ckpts/Weights/gs_head.pt'  
     frozenDepthHead: bool = False
     useOG_OmniVGGT: bool = False
     export_pt_path: str = 'ckpts/Weights'
@@ -404,7 +405,7 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
 
         self.pose_free = cfg.pose_free
         self.useDGGTGaussianHead = cfg.useDGGTGaussianHead
-        self.use0202GaussianHead = cfg.use0202GaussianHead
+        self.NotUsePretrainedGaussianHead = cfg.NotUsePretrainedGaussianHead
         if self.pose_free:
             if self.useDGGTGaussianHead:
                 self.gaussian_adapter = UnifiedGaussianAdapterForDGGT(cfg.gaussian_adapter)
@@ -432,11 +433,11 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
                 features=head_params.feature_dim,
             )
             
-        if self.use0202GaussianHead:
-            gs_head_state = load_ckpt_state_dict("checkpoints/merged_0202_epoch5/gaussian_param_head_weights.pth")
+        if not self.NotUsePretrainedGaussianHead:
+            gs_head_state = load_ckpt_state_dict(self.gshead_pt_path)
             gs_head_state = strip_prefix_from_state_dict(gs_head_state, "gaussian_param_head.")
             missing_gs, unexpected_gs = self.gaussian_param_head.load_state_dict(gs_head_state, strict=False)
-            print(f"Loaded gs_head ckpt: checkpoints/merged_0202_epoch5/gaussian_param_head_weights.pth")
+            print(f"Loaded gs_head ckpt: {self.gshead_pt_path}")
             print(f"gs_head missing={len(missing_gs)}, unexpected={len(unexpected_gs)}")
         
             del gs_head_state

@@ -42,6 +42,7 @@ def load_state_dict_from_file(file_path):
 def get_module_root_for_aggregator(keys):
     """自动推断 aggregator 所在的父级前缀，例如 model。"""
     candidates = []
+    found_top_level = False
     for key in keys:
         parts = key.split(".")
         for index, part in enumerate(parts):
@@ -49,10 +50,16 @@ def get_module_root_for_aggregator(keys):
                 parent = ".".join(parts[:index])
                 if parent:
                     candidates.append(parent)
+                else:
+                    found_top_level = True
                 break
 
-    if not candidates:
+    if not candidates and not found_top_level:
         return None
+
+    if not candidates and found_top_level:
+        # aggregator 位于顶层，无父级前缀。
+        return ""
 
     # 优先选择最短的父级，一般就是 model。
     return sorted(set(candidates), key=len)[0]
@@ -60,15 +67,17 @@ def get_module_root_for_aggregator(keys):
 
 def collect_sibling_module_prefixes(state_dict, module_root):
     """收集 module_root 同级下的所有一级子模块前缀。"""
-    if not module_root:
-        raise ValueError("module_root 不能为空")
-
     module_prefixes = OrderedDict()
-    root_prefix = module_root + "."
-    root_depth = len(module_root.split("."))
+    is_top_level = module_root == ""
+    if is_top_level:
+        root_prefix = ""
+        root_depth = 0
+    else:
+        root_prefix = module_root + "."
+        root_depth = len(module_root.split("."))
 
     for key in state_dict.keys():
-        if not key.startswith(root_prefix):
+        if not is_top_level and not key.startswith(root_prefix):
             continue
 
         parts = key.split(".")
@@ -170,7 +179,7 @@ def human_size(num_bytes):
         size /= 1024.0
 
 
-def export_sibling_modules(file_path, output_dir=None, lora_alpha=32.0):
+def export_sibling_modules(file_path, output_dir=None, lora_alpha=32.0, state_dict=None):
     if not os.path.exists(file_path):
         print(f"错误: 找不到文件 {file_path}")
         return
@@ -182,8 +191,9 @@ def export_sibling_modules(file_path, output_dir=None, lora_alpha=32.0):
 
     os.makedirs(output_dir, exist_ok=True)
 
-    print(f"正在加载: {file_path}")
-    state_dict = load_state_dict_from_file(file_path)
+    if state_dict is None:
+        print(f"正在加载: {file_path}")
+        state_dict = load_state_dict_from_file(file_path)
 
     module_root = get_module_root_for_aggregator(state_dict.keys())
     if module_root is None:
@@ -223,19 +233,21 @@ def export_sibling_modules(file_path, output_dir=None, lora_alpha=32.0):
         exported.append((module_prefix, save_path, len(module_state)))
 
     print(f"[OK] source: {os.path.abspath(file_path)}")
-    print(f"[OK] detected module root: {module_root}")
+    detected_root = module_root if module_root else "<top-level>"
+    print(f"[OK] detected module root: {detected_root}")
     print(f"[OK] exported modules: {len(exported)}")
     for module_prefix, save_path, key_count in exported:
         print(f"  - {module_prefix} -> {save_path}  ({key_count} keys)")
 
 
-def inspect_weights(file_path, max_modules=12, max_keys_per_module=3):
+def inspect_weights(file_path, max_modules=12, max_keys_per_module=3, state_dict=None):
     if not os.path.exists(file_path):
         print(f"错误: 找不到文件 {file_path}")
         return
 
-    print(f"正在加载: {file_path}")
-    state_dict = load_state_dict_from_file(file_path)
+    if state_dict is None:
+        print(f"正在加载: {file_path}")
+        state_dict = load_state_dict_from_file(file_path)
     keys = list(state_dict.keys())
     keys.sort()
     total_tensors = len(keys)
@@ -250,7 +262,8 @@ def inspect_weights(file_path, max_modules=12, max_keys_per_module=3):
     if module_root is not None:
         module_prefixes = collect_sibling_module_prefixes(state_dict, module_root)
         module_items = list(module_prefixes.items())
-        scope_label = f"aggregator 同级模块 (parent={module_root})"
+        detected_root = module_root if module_root else "<top-level>"
+        scope_label = f"aggregator 同级模块 (parent={detected_root})"
     else:
         module_prefixes = OrderedDict()
         for key in keys:
@@ -306,15 +319,18 @@ if __name__ == "__main__":
         help="LoRA alpha（默认 32）",
     )
     args = parser.parse_args()
+    print(f"正在加载: {args.file}")
+    state_dict = load_state_dict_from_file(args.file)
+
+    inspect_weights(args.file, state_dict=state_dict)
 
     if args.export_pt:
         export_sibling_modules(
             args.file,
             output_dir=args.output_dir,
             lora_alpha=args.lora_alpha,
+            state_dict=state_dict,
         )
-    else:
-        inspect_weights(args.file)
 
 # 仅检查 ckpt/safetensors，不导出
 # python check_model_split.py --file /path/to/epoch_xx.ckpt

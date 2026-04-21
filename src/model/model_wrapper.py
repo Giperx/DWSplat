@@ -332,8 +332,8 @@ class ModelWrapper(LightningModule):
         # print(f"total_loss: {total_loss}")
 
         # Skip batch if loss is too high after certain step
-        SKIP_AFTER_STEP = 2000 
-        LOSS_THRESHOLD = 2
+        SKIP_AFTER_STEP = 3000 
+        LOSS_THRESHOLD = 0.2
         if self.global_step > SKIP_AFTER_STEP and total_loss > LOSS_THRESHOLD:
             print(f"Skipping batch with high loss ({total_loss:.6f}) at step {self.global_step} on Rank {self.global_rank}")
             # set to a really small number

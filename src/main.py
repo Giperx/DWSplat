@@ -159,6 +159,21 @@ def train(cfg_dict: DictConfig):
         inference_mode=False if (cfg.mode == "test" and cfg.test.align_pose) else True,
     )
     torch.manual_seed(cfg_dict.seed + trainer.global_rank)
+
+    # 兼容两种写法：优先 trainer.print_log_every_n_steps，其次 train.print_log_every_n_steps。
+    print_log_every_n_steps = OmegaConf.select(
+        cfg_dict,
+        "trainer.print_log_every_n_steps",
+    )
+    if print_log_every_n_steps is None:
+        print_log_every_n_steps = OmegaConf.select(
+            cfg_dict,
+            "train.print_log_every_n_steps",
+            default=50,
+        )
+    cfg.train.print_log_every_n_steps = int(print_log_every_n_steps)
+    if _is_rank_zero():
+        print(cyan(f"Resolved print_log_every_n_steps={cfg.train.print_log_every_n_steps}"))
     
     model = get_model(
         cfg.model.encoder,

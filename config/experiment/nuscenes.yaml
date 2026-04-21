@@ -29,13 +29,15 @@ model:
     use_lora_aggregator: true # only when freeze_backbone is false, this flag is effective
     freeze_patch_embed_in_lora: true # true: LoRA 不作用于 patch_embed 相关层
     useOG_OmniVGGT: true
-    export_pt_path: 'checkpoints/merged_ckpts_00'
+    export_pt_path: 'checkpoints/merged_ckpts_00' # only when useOG_OmniVGGT is false, this path is effective
+    # aggregator_merged.ckpt depth_head.ckpt
     distill: true
     frozenAggregator: true # not used
     frozenGaussianHead: false
     useDGGTGaussianHead: false
     frozenDepthHead: false
-    use0202GaussianHead: false
+    NotUsePretrainedGaussianHead: true
+    gshead_pt_path: 'checkpoints/merged_ckpts_00/gs_head.pt' # only when NotUsePretrainedGaussianHead is false, this path is effective
     min_depth: 1.5
     max_depth: 110.0
     render_conf: false
@@ -54,7 +56,7 @@ dataset:
       num_target_views: 3
       # min_distance_between_context_views: 32
       # max_distance_between_context_views: 256
-      max_img_per_gpu: 9
+      max_img_per_gpu: 3
     avg_pose: false
     intr_augment: false
     normalize_by_pts3d: false
@@ -67,6 +69,7 @@ optimizer:
   # 4gpu, 9imgs, 6e-5    linear scale: 1.8e-5
   # 4gpu, 9imgs, gredient_accum 2, 8.6e-5    linear scale: 3.75e-5
   # 8gpu, 24imgs, 1.4e-4    linear scale: 1e-4
+  # 4gpu ,24imgs, 1e-4    linear scale: 5e-5  4307
   warm_up_steps: 2000
   backbone_lr_multiplier: 0.1 #0.1
 
@@ -101,8 +104,8 @@ train:
   weight_depth_l1: 0.02 # gs render depth and distill depth-head metric depth
   weight_depth_gradient: 0.0 # gs render depth and distill depth-head metric depth
   weight_depth_norm_head_mse: 0.05 # depth-head norm depth adn distill depth-head norm depth
-  weight_depth_norm_head_gradient: 0.05 # depth-head norm depth adn distill depth-head norm depth
-  weight_depth_scale: 0.05 # explicit median-scale anchor to prevent scene scale collapse
+  weight_depth_norm_head_gradient: 0.00 # depth-head norm depth adn distill depth-head norm depth
+  weight_depth_scale: 0.00 # explicit median-scale anchor to prevent scene scale collapse
   weight_normal: 0.0
   distill_warmup_steps: 1000
   distill_warmup_start: 0.4
