@@ -37,6 +37,7 @@ high_conf_supplement_quantile: 0.7
 
 # LoRA fine-tuning for aggregator.
 use_lora_aggregator: false
+freeze_patch_embed_in_lora: false
 lora_layer_names: [qkv, proj, fc1, fc2]
 lora_rank: 8
 lora_alpha: 32

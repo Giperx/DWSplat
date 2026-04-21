@@ -115,6 +115,7 @@ class EncoderAnySplatCfg:
         "None",
     ] = "None"
     use_lora_aggregator: bool = False
+    freeze_patch_embed_in_lora: bool = False
     lora_layer_names: List[str] = field(default_factory=lambda: ["qkv", "proj", "fc1", "fc2"])
     lora_rank: int = 8
     lora_alpha: int = 32
@@ -214,6 +215,7 @@ def apply_lora(
     rank: int = 8,
     alpha: int = 32,
     dropout: float = 0.0,
+    freeze_patch_embed_in_lora: bool = False,
 ) -> nn.Module:
     if layer_names is None:
         layer_names = []
@@ -225,6 +227,8 @@ def apply_lora(
         for name, child in module.named_children():
             full_name = f"{prefix}.{name}" if prefix else name
             should_replace = any(key in full_name for key in layer_names)
+            if freeze_patch_embed_in_lora and "patch_embed" in full_name:
+                should_replace = False
 
             if should_replace and isinstance(child, nn.Linear):
                 setattr(module, name, LoRALinear(child, rank, alpha, dropout))
@@ -302,6 +306,7 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
                 rank=cfg.lora_rank,
                 alpha=cfg.lora_alpha,
                 dropout=cfg.lora_dropout,
+                freeze_patch_embed_in_lora=cfg.freeze_patch_embed_in_lora,
             )
 
         self.freeze_backbone = cfg.freeze_backbone
@@ -365,7 +370,7 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
             lora_trainable, total_trainable = set_lora_trainable_only(self.aggregator)
             print(
                 "LoRA enabled for aggregator:",
-                f"layers={cfg.lora_layer_names}, rank={cfg.lora_rank}, alpha={cfg.lora_alpha}, dropout={cfg.lora_dropout}",
+                f"layers={cfg.lora_layer_names}, rank={cfg.lora_rank}, alpha={cfg.lora_alpha}, dropout={cfg.lora_dropout}, freeze_patch_embed_in_lora={cfg.freeze_patch_embed_in_lora}",
             )
             print(
                 f"Aggregator trainable params (LoRA only): {lora_trainable} / {total_trainable}"

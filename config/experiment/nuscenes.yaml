@@ -27,6 +27,7 @@ model:
     pred_head_type: depth
     freeze_backbone: false # means freeze aggregator and depth head
     use_lora_aggregator: true # only when freeze_backbone is false, this flag is effective
+    freeze_patch_embed_in_lora: true # true: LoRA 不作用于 patch_embed 相关层
     useOG_OmniVGGT: true
     export_pt_path: 'checkpoints/merged_ckpts_00'
     distill: true
@@ -60,7 +61,7 @@ dataset:
     rescale_to_1cube: false
 
 optimizer:
-  lr: 5e-5 
+  lr: 4e-5 
   # 2e-4 and 24 per gpu, 16 gpus
   # 1gpu, 9imgs, 3e-5    linear scale: 4.6e-6
   # 4gpu, 9imgs, 6e-5    linear scale: 1.8e-5
@@ -87,7 +88,7 @@ checkpointing:
   # load: outputs/exp_OmniVGGT_nuScenes_omnivggt_finetune/2026-04-15_21-15-46_work1v2_add_gs_12000/checkpoints/epoch_1-step_10000.ckpt
   log_save_dir: outputs/exp_OmniVGGT_${wandb.name}/${now:%Y-%m-%d_%H-%M-%S}
   flag_gaussian_head: true # 是否读取Gaussian Head的权重
-  every_n_train_steps: 3000
+  every_n_train_steps: 10000
   save_weights_only: false
   save_top_k: 100
   
