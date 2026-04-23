@@ -241,7 +241,7 @@ class DatasetNuScenes(Dataset):
             if self.stage == "train":
                 start_indices = range(0, max_start_idx + 1)
             else:
-                start_indices = [0]
+                start_indices = [0, 1]
             
             for i in start_indices:
                 # We store indices into the 'timesteps' list, not the timestep value itself
@@ -376,7 +376,7 @@ class DatasetNuScenes(Dataset):
             use_front_group = random.choice([True, False])
         else:
             # Deterministic for val (e.g., even index front, odd back, or just always front)
-            use_front_group = (index % 2 == 0)
+            use_front_group = (sample_info['start_idx'] % 2 == 0)
 
         cam_ids = self.CAM_GROUP_FRONT if use_front_group else self.CAM_GROUP_BACK
         
@@ -387,26 +387,26 @@ class DatasetNuScenes(Dataset):
         # Order: Frame 1 (Cam A, B, C), Frame 2 (Cam A, B, C)... 
         
         images = []
-        masks = []
+        # masks = []
         extrinsics = []
         intrinsics = []
-        depthmaps_omnivggt = []
-        masks_omnivggt = []
-        depth_indices = [] # 暂时没用，没有使用到depth map
-        camera_indices = []
+        # depthmaps_omnivggt = []
+        # masks_omnivggt = []
+        # depth_indices = [] # 暂时没用，没有使用到depth map
+        # camera_indices = []
         
-        # 先别用 list，直接准备 per-view 的 tensor（稍后知道 V 也行）
-        # 这里在确定 timesteps / cam_ids 后就能确定 V
-        V = len(timesteps) * len(cam_ids)  # = 3 * numTimes
+        # # 先别用 list，直接准备 per-view 的 tensor（稍后知道 V 也行）
+        # # 这里在确定 timesteps / cam_ids 后就能确定 V
+        # V = len(timesteps) * len(cam_ids)  # = 3 * numTimes
 
-        # camera_indices: 每个时间戳三路相机固定为 0,1,2（按 cam_ids 的顺序）
-        camera_indices = torch.tensor(
-            [i for _ in timesteps for i in range(len(cam_ids))],
-            dtype=torch.int64,
-        )  # shape: (V,)
+        # # camera_indices: 每个时间戳三路相机固定为 0,1,2（按 cam_ids 的顺序）
+        # camera_indices = torch.tensor(
+        #     [i for _ in timesteps for i in range(len(cam_ids))],
+        #     dtype=torch.int64,
+        # )  # shape: (V,)
 
-        # depth_indices: 你不使用 depth，就给占位 -1
-        depth_indices = torch.full((V,), -1, dtype=torch.int64)  # shape: (V,)
+        # # depth_indices: 你不使用 depth，就给占位 -1
+        # depth_indices = torch.full((V,), -1, dtype=torch.int64)  # shape: (V,)
 
             
         

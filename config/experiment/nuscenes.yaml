@@ -25,19 +25,19 @@ model:
     anchor_feat_dim: 128
     gs_prune: false # ablate: opacity loss
     pred_head_type: depth
-    freeze_backbone: false # means freeze aggregator and depth head
-    use_lora_aggregator: true # only when freeze_backbone is false, this flag is effective
+    freeze_backbone: true # means freeze aggregator and depth head
+    use_lora_aggregator: false # only when freeze_backbone is false, this flag is effective
     freeze_patch_embed_in_lora: true # true: LoRA 不作用于 patch_embed 相关层
-    useOG_OmniVGGT: true
-    export_pt_path: 'checkpoints/merged_ckpts_00' # only when useOG_OmniVGGT is false, this path is effective
+    useOG_OmniVGGT: false
+    export_pt_path: 'checkpoints/distill_recon_dwsplat/e5s1w2_distill_recon' # only when useOG_OmniVGGT is false, this path is effective
     # aggregator_merged.ckpt depth_head.ckpt
-    distill: true
+    distill: false
     frozenAggregator: true # not used
     frozenGaussianHead: false
     useDGGTGaussianHead: false
-    frozenDepthHead: false
-    NotUsePretrainedGaussianHead: true
-    gshead_pt_path: 'checkpoints/merged_ckpts_00/gs_head.pt' # only when NotUsePretrainedGaussianHead is false, this path is effective
+    frozenDepthHead: true
+    NotUsePretrainedGaussianHead: false
+    gshead_pt_path: 'checkpoints/gshead_pt/merged_0202_epoch5/gaussian_param_head_weights.pth' # only when NotUsePretrainedGaussianHead is false, this path is effective
     min_depth: 1.5
     max_depth: 110.0
     render_conf: false
@@ -56,20 +56,22 @@ dataset:
       num_target_views: 3
       # min_distance_between_context_views: 32
       # max_distance_between_context_views: 256
-      max_img_per_gpu: 3
+      max_img_per_gpu: 15
     avg_pose: false
     intr_augment: false
     normalize_by_pts3d: false
     rescale_to_1cube: false
 
 optimizer:
-  lr: 4e-5 
+  lr: 6e-5 
   # 2e-4 and 24 per gpu, 16 gpus
   # 1gpu, 9imgs, 3e-5    linear scale: 4.6e-6
   # 4gpu, 9imgs, 6e-5    linear scale: 1.8e-5
   # 4gpu, 9imgs, gredient_accum 2, 8.6e-5    linear scale: 3.75e-5
   # 8gpu, 24imgs, 1.4e-4    linear scale: 1e-4
   # 4gpu ,24imgs, 1e-4    linear scale: 5e-5  4307
+  # 4gpu, 15imgs, 7.9e-5 linear scale: 3.125e-5 6892
+  # 2gpu, 15imgs, 5.5e-5 linear scale: 1.56e-5 13785
   warm_up_steps: 2000
   backbone_lr_multiplier: 0.1 #0.1
 
@@ -78,10 +80,10 @@ data_loader:
     batch_size: 4 # not used here
     
 trainer:
-  max_steps: 80000
+  max_steps: 50000
   val_check_interval: 1000
   log_every_n_steps: 20
-  print_log_every_n_steps: 20
+  print_log_every_n_steps: 50
   num_nodes: 1
   accumulate_grad_batches: 1
   precision: "bf16-mixed" #"32" bf16-mixed
@@ -91,7 +93,7 @@ checkpointing:
   # load: outputs/exp_OmniVGGT_nuScenes_omnivggt_finetune/2026-04-15_21-15-46_work1v2_add_gs_12000/checkpoints/epoch_1-step_10000.ckpt
   log_save_dir: outputs/exp_OmniVGGT_${wandb.name}/${now:%Y-%m-%d_%H-%M-%S}
   flag_gaussian_head: true # 是否读取Gaussian Head的权重
-  every_n_train_steps: 10000
+  every_n_train_steps: 5000
   save_weights_only: false
   save_top_k: 100
   

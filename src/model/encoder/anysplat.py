@@ -282,14 +282,14 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
             del model_full
         else:
             export_root = Path(cfg.export_pt_path)
-            aggregator_ckpt = export_root / "aggregator_merged.ckpt"
-            depth_head_ckpt = export_root / "depth_head.ckpt"
+            aggregator_ckpt = export_root / "aggregator_merged.pt"
+            depth_head_ckpt = export_root / "depth_head.pt"
 
             agg_state = load_ckpt_state_dict(aggregator_ckpt)
             dep_state = load_ckpt_state_dict(depth_head_ckpt)
 
-            agg_state = strip_prefix_from_state_dict(agg_state, "aggregator.")
-            dep_state = strip_prefix_from_state_dict(dep_state, "depth_head.")
+            agg_state = strip_prefix_from_state_dict(agg_state, ".")
+            dep_state = strip_prefix_from_state_dict(dep_state, ".")
 
             missing_agg, unexpected_agg = self.aggregator.load_state_dict(agg_state, strict=False)
             missing_dep, unexpected_dep = self.depth_head.load_state_dict(dep_state, strict=False)
@@ -434,10 +434,10 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
             )
             
         if not self.NotUsePretrainedGaussianHead:
-            gs_head_state = load_ckpt_state_dict(self.gshead_pt_path)
+            gs_head_state = load_ckpt_state_dict(cfg.gshead_pt_path)
             gs_head_state = strip_prefix_from_state_dict(gs_head_state, "gaussian_param_head.")
             missing_gs, unexpected_gs = self.gaussian_param_head.load_state_dict(gs_head_state, strict=False)
-            print(f"Loaded gs_head ckpt: {self.gshead_pt_path}")
+            print(f"Loaded gs_head ckpt: {cfg.gshead_pt_path}")
             print(f"gs_head missing={len(missing_gs)}, unexpected={len(unexpected_gs)}")
         
             del gs_head_state
