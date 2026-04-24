@@ -20,7 +20,7 @@ model:
     intrinsics_embed_loc: encoder
     intrinsics_embed_type: token
     pretrained_weights: ''
-    voxel_size: 0.002
+    voxel_size: 0.025
     pred_pose: true
     anchor_feat_dim: 128
     gs_prune: false # ablate: opacity loss
@@ -90,7 +90,7 @@ trainer:
 
 checkpointing:
   load: null
-  # load: outputs/exp_OmniVGGT_nuScenes_omnivggt_finetune/2026-04-15_21-15-46_work1v2_add_gs_12000/checkpoints/epoch_1-step_10000.ckpt
+  # load: outputs/exp_OmniVGGT_nuScenes_omnivggt_finetune/2026-04-23_23-51-21/checkpoints/epoch_3-step_25000.ckpt
   log_save_dir: outputs/exp_OmniVGGT_${wandb.name}/${now:%Y-%m-%d_%H-%M-%S}
   flag_gaussian_head: true # 是否读取Gaussian Head的权重
   every_n_train_steps: 5000
@@ -126,7 +126,7 @@ loss:
     weight: 0.05
     conf: false
   depth_consis:
-    weight: 0.0001 # 
+    weight: 0.001 # 
     loss_type: MSE
 
 

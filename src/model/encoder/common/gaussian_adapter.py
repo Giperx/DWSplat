@@ -127,8 +127,10 @@ class UnifiedGaussianAdapter(GaussianAdapter):
         # scales = 0.001 * F.softplus(scales)
         # scales = scales.clamp_max(0.3)
 
-        scales = 0.003 * F.softplus(scales)
-        scales = scales.clamp_max(0.5)
+        # scales = 0.003 * F.softplus(scales)
+        # scales = scales.clamp_max(0.5)
+        scales = 0.03 * F.softplus(scales)
+        scales = scales.clamp_max(5.0)
         # scales = 0.1 * F.softplus(scales) 
         # scales = 0.06 * F.softplus(scales) # # 0.003 * 46 = 0.138 0.5 * 46 = 23
         # scales = scales.clamp_max(12.0)  # 放宽最大限制到 10m~15m 左右，允许远处的背景有大体积高斯

@@ -168,9 +168,8 @@ class DataModule(LightningDataModule):
         sampler.set_epoch(0)
         self.val_loader = DataLoader(
             dataset,
-            self.data_loader_cfg.val.batch_size,
+            batch_sampler=sampler,
             num_workers=self.data_loader_cfg.val.num_workers,
-            sampler=sampler,
             generator=self.get_generator(self.data_loader_cfg.val),
             worker_init_fn=worker_init_fn,
             persistent_workers=self.get_persistent(self.data_loader_cfg.val),

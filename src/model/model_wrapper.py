@@ -527,49 +527,46 @@ class ModelWrapper(LightningModule):
         )
         self.benchmarker.summarize()
 
-    @rank_zero_only
-    def validation_step(self, batch, batch_idx, dataloader_idx=0):        
+    
+    def validation_step(self, batch, batch_idx, dataloader_idx=0):
+        is_rank0 = self.global_rank == 0
+
         batch: BatchedExample = self.data_shim(batch)
 
-        if self.global_rank == 0:
+        if is_rank0:
             print(
                 f"validation step {self.global_step}; "
                 f"scene = {batch['scene']}; "
                 f"context = {batch['context']['index'].tolist()}"
             )
-
+        
+        
         # Render Gaussians.
         b, v, _, h, w = batch["context"]["image"].shape
-        assert b == 1
         visualization_dump = {}
 
         encoder_output, output = self.model(batch, self.global_step, visualization_dump=visualization_dump)
-        gaussians, pred_pose_enc_list, depth_dict = encoder_output.gaussians, encoder_output.pred_pose_enc_list, encoder_output.depth_dict
-        pred_context_pose, distill_infos = encoder_output.pred_context_pose, encoder_output.distill_infos
+        _, _, depth_dict = encoder_output.gaussians, encoder_output.pred_pose_enc_list, encoder_output.depth_dict
+        distill_infos = encoder_output.distill_infos
         infos = encoder_output.infos
 
         GS_num = infos['voxelize_ratio'] * (h*w*v)
         self.log("val/GS_num", GS_num)
-        
-        num_context_views = pred_context_pose['extrinsic'].shape[1]
-        num_target_views = batch["target"]["extrinsics"].shape[1]
-        rgb_pred = output.color[0].float()
-        depth_pred = vis_depth_map(output.depth[0])
-
-        # direct depth from gaussian means (used for visualization only)
-        gaussian_means = visualization_dump["depth"][0].squeeze()
-        if gaussian_means.shape[-1] == 3:
-            gaussian_means = gaussian_means.mean(dim=-1)
 
         # Compute validation metrics.
-        rgb_gt = (batch["context"]["image"][0].float() + 1) / 2
-        psnr = compute_psnr(rgb_gt, rgb_pred).mean()
+        rgb_gt = (batch["context"]["image"].float() + 1) / 2
+        rgb_pred = output.color.float()
+        rgb_gt_metric = rearrange(rgb_gt, "b v c h w -> (b v) c h w")
+        rgb_pred_metric = rearrange(rgb_pred, "b v c h w -> (b v) c h w")
+
+        psnr = compute_psnr(rgb_gt_metric, rgb_pred_metric).mean()
         self.log(f"val/psnr", psnr)
-        lpips = compute_lpips(rgb_gt, rgb_pred).mean()
+        lpips = compute_lpips(rgb_gt_metric, rgb_pred_metric).mean()
         self.log(f"val/lpips", lpips)
-        ssim = compute_ssim(rgb_gt, rgb_pred).mean()
+        ssim = compute_ssim(rgb_gt_metric, rgb_pred_metric).mean()
         self.log(f"val/ssim", ssim)
-        print("psnr, lpips, ssim:", psnr, lpips, ssim)
+        if is_rank0:
+            print("psnr, lpips, ssim:", psnr, lpips, ssim)
         
         # depth metrics
         consis_absrel = abs_relative_difference(
@@ -585,62 +582,68 @@ class ModelWrapper(LightningModule):
         )
         self.log("val/consis_delta1", consis_delta1.mean())
 
-        diff_map = torch.abs(output.depth - depth_dict['depth'].squeeze(-1))
-        self.log("val/consis_mse", diff_map[distill_infos['conf_mask']].mean())
-
-        # Construct comparison image.
-        context_img = inverse_normalize(batch["context"]["image"][0])
-        # context_img_depth = vis_depth_map(gaussian_means)
-        context = []
-        for i in range(context_img.shape[0]):
-            context.append(context_img[i])
-            # context.append(context_img_depth[i])
-        
-        colored_diff_map = vis_depth_map(diff_map[0], near=torch.tensor(1e-4, device=diff_map.device), far=torch.tensor(1.0, device=diff_map.device))
-        model_depth_pred = depth_dict["depth"].squeeze(-1)[0]
-        model_depth_pred = vis_depth_map(model_depth_pred)
-        
-        render_normal = (get_normal_map(output.depth.flatten(0, 1), batch["context"]["intrinsics"].flatten(0, 1)).permute(0, 3, 1, 2) + 1) / 2.
-        pred_normal = (get_normal_map(depth_dict['depth'].flatten(0, 1).squeeze(-1), batch["context"]["intrinsics"].flatten(0, 1)).permute(0, 3, 1, 2) + 1) / 2.
-        
-        
-        ### 增加GT mask的可视化
-        # gt_mask = batch["context"]["fine_dynamic_masks"][0] # b, v, 1, h, w
-        # # print("****gt_mask shape:", gt_mask.shape)
-        # if gt_mask.dim() == 4 and gt_mask.shape[1] == 1:
-        #     gt_mask = gt_mask.repeat(1, 3, 1, 1)  # -> (V, 3, H, W)
-        #     # 0-1 -> 0-255 uint8
-        #     gt_mask = (gt_mask * 255).clamp(0, 255).byte()
-        #     # 再变回 0-1 浮点，但值只有 0/1 对应 0/255
-        #     gt_mask = gt_mask.float() / 255.0 ### TODO: 保存的图片还是全白色的
-        # gt_dynamic_mask_list = [gt_mask[i] for i in range(gt_mask.shape[0])]
-    
-        comparison = hcat(
-            add_label(vcat(*context), "Context"),
-            # add_label(vcat(*rgb_gt), "Target (Ground Truth)"),
-            add_label(vcat(*rgb_pred), "Target (Prediction)"),
-            # add_label(vcat(*gt_dynamic_mask_list), "Dynamic Mask(GT)"),
-            add_label(vcat(*depth_pred), "Depth (Prediction)"),
-            add_label(vcat(*model_depth_pred), "Depth (Aggregator Prediction)"),
-            add_label(vcat(*render_normal), "Normal (Prediction)"),
-            add_label(vcat(*pred_normal), "Normal (Aggregator Prediction)"),
-            add_label(vcat(*colored_diff_map), "Diff Map"),
+        valid_mask = (
+            distill_infos['conf_mask']
+            if distill_infos is not None and 'conf_mask' in distill_infos
+            else torch.ones_like(output.depth, dtype=torch.bool, device=output.depth.device)
         )
+        diff_map = torch.abs(output.depth - depth_dict['depth'].squeeze(-1))
+        self.log("val/consis_mse", diff_map[valid_mask].mean())
 
-        comparison = torch.nn.functional.interpolate(
-            comparison.unsqueeze(0), 
-            scale_factor=1.0,
-            mode='bicubic', 
-            align_corners=False
-        ).squeeze(0)
+        render_normal = (
+            get_normal_map(
+                output.depth.flatten(0, 1),
+                batch["context"]["intrinsics"].flatten(0, 1),
+            ).permute(0, 3, 1, 2) + 1
+        ) / 2.
+        pred_normal = (
+            get_normal_map(
+                depth_dict['depth'].flatten(0, 1).squeeze(-1),
+                batch["context"]["intrinsics"].flatten(0, 1),
+            ).permute(0, 3, 1, 2) + 1
+        ) / 2.
+        render_normal = rearrange(render_normal, "(b v) c h w -> b v c h w", b=b, v=v)
+        pred_normal = rearrange(pred_normal, "(b v) c h w -> b v c h w", b=b, v=v)
         
-        self._log_image(
-            # f"images/{batch['scene'][0]}_b{batch_idx}",
-            f"images/{batch['scene'][0]}",
-            [prep_image(add_border(comparison))],
-            step=self.global_step,
-            caption=batch["scene"],
-        )    
+        is_rank0 = True
+        if is_rank0:
+            for sample_idx in range(b):
+                # Construct comparison image for each sample in the batch.
+                context_img = inverse_normalize(batch["context"]["image"][sample_idx])
+                context = [context_img[i] for i in range(context_img.shape[0])]
+
+                depth_pred = vis_depth_map(output.depth[sample_idx])
+                colored_diff_map = vis_depth_map(
+                    diff_map[sample_idx],
+                    near=torch.tensor(1e-4, device=diff_map.device),
+                    far=torch.tensor(1.0, device=diff_map.device),
+                )
+                model_depth_pred = vis_depth_map(depth_dict["depth"].squeeze(-1)[sample_idx])
+
+                comparison = hcat(
+                    add_label(vcat(*context), "Context"),
+                    add_label(vcat(*rgb_pred[sample_idx]), "Target (Prediction)"),
+                    add_label(vcat(*depth_pred), "Depth (Prediction)"),
+                    add_label(vcat(*model_depth_pred), "Depth (Aggregator Prediction)"),
+                    add_label(vcat(*render_normal[sample_idx]), "Normal (Prediction)"),
+                    add_label(vcat(*pred_normal[sample_idx]), "Normal (Aggregator Prediction)"),
+                    add_label(vcat(*colored_diff_map), "Diff Map"),
+                )
+
+                comparison = torch.nn.functional.interpolate(
+                    comparison.unsqueeze(0),
+                    scale_factor=1.0,
+                    mode='bicubic',
+                    align_corners=False,
+                ).squeeze(0)
+
+                scene_name = batch['scene'][sample_idx]
+                self._log_image(
+                    f"images/{scene_name}",
+                    [prep_image(add_border(comparison))],
+                    step=self.global_step,
+                    caption=[scene_name],
+                )
 
         # self.logger.log_image(
         #     key="comparison",
@@ -672,55 +675,55 @@ class ModelWrapper(LightningModule):
         # )
 
 
-        ### add 验证时就可以输出宽视野图像
-        _, output_wide = self.model(batch, self.global_step, visualization_dump=visualization_dump, wide_fov=True, new_width=w*2) 
-        rgb_pred_wide = output_wide.color[0].float()
-        # depth_pred_wide = vis_depth_map(output_wide.depth[0])
-        # render_normal_wide = (get_normal_map(output_wide.depth.flatten(0, 1), batch["context"]["intrinsics"].flatten(0, 1)).permute(0, 3, 1, 2) + 1) / 2.
-        
-        ### 只需要rgb_gt的cur当前帧以及his的front view
-        rgb_gt_need = []
-        rgb_gt_need.extend(rgb_gt[:3])  # cur
-        for i in range(3, v):  # his
-            if i % 3 == 0:
-                rgb_gt_need.append(rgb_gt[i])
-        # rgb_gt_need = torch.stack(rgb_gt_need, dim=0)
-                
-        rgb_pred_wide = output_wide.color[0].float()
-        rgb_pred_wide_need = []
-        rgb_pred_wide_need.extend(rgb_pred_wide[:3])  # cur
-        for i in range(3, v):  # his
-            if i % 3 == 0:
-                rgb_pred_wide_need.append(rgb_pred_wide[i])
-            
-        
-        comparison_wide = hcat(
-            # add_label(vcat(*rgb_pred), "Target (Prediction_OG)"),
-            add_label(vcat(*rgb_gt_need), "Target (Ground Truth)"),
-            add_label(vcat(*rgb_pred_wide_need), "Target (Prediction)"),
-            # add_label(vcat(*depth_pred_wide), "Depth (Prediction)"),
-            # add_label(vcat(*render_normal_wide), "Normal (Prediction)"),
-        )
+        # add 验证时就可以输出宽视野图像
+        if is_rank0:
+            _, output_wide = self.model(
+                batch,
+                self.global_step,
+                visualization_dump=visualization_dump,
+                wide_fov=True,
+                new_width=w * 2,
+            )
+            rgb_pred_wide = output_wide.color.float()
 
-        comparison_wide = torch.nn.functional.interpolate(
-            comparison_wide.unsqueeze(0), 
-            scale_factor=1.0, 
-            mode='bicubic', 
-            align_corners=False
-        ).squeeze(0)
-        
-        self._log_image(
-            f"wide_images/wide_{batch['scene'][0]}",
-            [prep_image(add_border(comparison_wide))],
-            step=self.global_step,
-            caption=batch["scene"],
-        )
+            for sample_idx in range(b):
+                rgb_gt_need = []
+                rgb_gt_need.extend(rgb_gt[sample_idx, :3])  # cur
+                for i in range(3, v):  # his
+                    if i % 3 == 0:
+                        rgb_gt_need.append(rgb_gt[sample_idx, i])
 
-        if self.encoder_visualizer is not None:
-            for k, image in self.encoder_visualizer.visualize(
-                batch["context"], self.global_step
-            ).items():
-                self._log_image(k, [prep_image(image)], step=self.global_step)
+                rgb_pred_wide_need = []
+                rgb_pred_wide_need.extend(rgb_pred_wide[sample_idx, :3])  # cur
+                for i in range(3, v):  # his
+                    if i % 3 == 0:
+                        rgb_pred_wide_need.append(rgb_pred_wide[sample_idx, i])
+
+                comparison_wide = hcat(
+                    add_label(vcat(*rgb_gt_need), "Target (Ground Truth)"),
+                    add_label(vcat(*rgb_pred_wide_need), "Target (Prediction)"),
+                )
+
+                comparison_wide = torch.nn.functional.interpolate(
+                    comparison_wide.unsqueeze(0),
+                    scale_factor=1.0,
+                    mode='bicubic',
+                    align_corners=False,
+                ).squeeze(0)
+
+                scene_name = batch['scene'][sample_idx]
+                self._log_image(
+                    f"wide_images/wide_{scene_name}",
+                    [prep_image(add_border(comparison_wide))],
+                    step=self.global_step,
+                    caption=[scene_name],
+                )
+
+            if self.encoder_visualizer is not None:
+                for k, image in self.encoder_visualizer.visualize(
+                    batch["context"], self.global_step
+                ).items():
+                    self._log_image(k, [prep_image(image)], step=self.global_step)
         
         # Run video validation step.
         # self.render_video_interpolation(batch)
