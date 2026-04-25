@@ -25,17 +25,17 @@ model:
     anchor_feat_dim: 128
     gs_prune: false # ablate: opacity loss
     pred_head_type: depth
-    freeze_backbone: true # means freeze aggregator and depth head
+    freeze_backbone: false # means freeze aggregator and depth head
     use_lora_aggregator: false # only when freeze_backbone is false, this flag is effective
     freeze_patch_embed_in_lora: true # true: LoRA 不作用于 patch_embed 相关层
     useOG_OmniVGGT: false
     export_pt_path: 'checkpoints/distill_recon_dwsplat/e5s1w2_distill_recon' # only when useOG_OmniVGGT is false, this path is effective
     # aggregator_merged.ckpt depth_head.ckpt
-    distill: false
+    distill: true
     frozenAggregator: true # not used
     frozenGaussianHead: false
     useDGGTGaussianHead: false
-    frozenDepthHead: true
+    frozenDepthHead: false
     NotUsePretrainedGaussianHead: false
     gshead_pt_path: 'checkpoints/gshead_pt/merged_0202_epoch5/gaussian_param_head_weights.pth' # only when NotUsePretrainedGaussianHead is false, this path is effective
     min_depth: 1.5
@@ -98,16 +98,16 @@ checkpointing:
   save_top_k: 100
   
 train:
-  pose_loss_alpha: 1.0
-  pose_loss_delta: 1.0
+  pose_loss_alpha: 0.0
+  pose_loss_delta: 0.0
   cxt_depth_weight: 0.0
-  weight_pose: 0.0 #10.0
+  weight_pose: 1.0 #10.0
   weight_depth: 1.0 # loss_depth_l1 + loss_depth_gradient
   weight_depth_l1: 0.02 # gs render depth and distill depth-head metric depth
-  weight_depth_gradient: 0.0 # gs render depth and distill depth-head metric depth
+  weight_depth_gradient: 0.0 # gs render depth and distill depth-head metric depth  
   weight_depth_norm_head_mse: 0.05 # depth-head norm depth adn distill depth-head norm depth
   weight_depth_norm_head_gradient: 0.00 # depth-head norm depth adn distill depth-head norm depth
-  weight_depth_scale: 0.00 # explicit median-scale anchor to prevent scene scale collapse
+  weight_depth_scale: 0.02 # explicit median-scale anchor to prevent scene scale collapse
   weight_normal: 0.0
   distill_warmup_steps: 1000
   distill_warmup_start: 0.4

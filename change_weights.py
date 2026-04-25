@@ -73,6 +73,8 @@ def evaluate(cfg_dict: DictConfig):
         torch.cuda.synchronize()
         torch.cuda.empty_cache()
     
+    if not cfg.output_path.exists():
+        cfg.output_path.mkdir(parents=True, exist_ok=True)
     model.save_pretrained(cfg.output_path)
 
 
@@ -81,5 +83,5 @@ if __name__ == "__main__":
 
 # cat epoch_0-step_17000.part.* > epoch_0-step_17000.tar.gz
 # 260129_singleFramesReTrainGSHeadEpoch1Iter10000  260129_singleFramesReTrainGSHeadEpoch2Iter25000
-# CUDA_VISIBLE_DEVICES=1 python change_weights.py +experiment=nuscenes +output_path=/home/test/LIVA/XZP/FeedForward/fine_tune4/DWSplat_0202/Weights/260203SingleFramesVol0002Epoch3Iter20000/weights checkpointing.load=/home/test/LIVA/XZP/FeedForward/fine_tune4/DWSplat_0202/Weights/260203SingleFramesVol0002Epoch3Iter20000/epoch_3-step_20000.ckpt
+# CUDA_VISIBLE_DEVICES=4 python change_weights.py +experiment=nuscenes +output_path='outputs/exp_OmniVGGT_nuScenes_omnivggt_finetune/2026-04-24_10-27-16_distill_recon_dwsplat_woLora_wg_e5s1w2_vol0.024scale0.03+5.0/checkpoints/epoch_5-step_40000_safe' checkpointing.load='outputs/exp_OmniVGGT_nuScenes_omnivggt_finetune/2026-04-24_10-27-16_distill_recon_dwsplat_woLora_wg_e5s1w2_vol0.024scale0.03+5.0/checkpoints/epoch_5-step_40000.ckpt'
 

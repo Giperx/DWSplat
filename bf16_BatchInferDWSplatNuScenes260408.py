@@ -3,12 +3,15 @@ import sys
 import torch
 import re
 import math
+import json
 import numpy as np
 from pathlib import Path
 from PIL import Image
 from torchvision.utils import save_image
 import torchvision.transforms as tf
 from tqdm import tqdm
+from dacite import Config, from_dict
+from safetensors.torch import load_file as load_safetensors
 
 # ================= Configuration =================
 # Set GPU ID if needed, e.g., os.environ["CUDA_VISIBLE_DEVICES"] = "0"
@@ -17,6 +20,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Import Model and Geometry Utils
 # Assuming these paths exist based on your provided file context
 from src.model.model.anysplat import AnySplat 
+from src.model.encoder.anysplat import EncoderAnySplatCfg
+from src.model.decoder.decoder_splatting_cuda import DecoderSplattingCUDACfg
 from src.model.encoder.vggt.utils.geometry import closed_form_inverse_se3
 # CUDA_VISIBLE_DEVICES=4 python bf16_BatchInferDWSplatNuScenes260408.py
 # --- Batch Settings ---
@@ -35,12 +40,12 @@ BLEND_EDGE_WIDTH = 100
 FUSION_METHOD = 'two_band' # 'simple' or 'two_band'
 
 # --- Paths ---
-PRETRAINED_PATH = "outputs/exp_OmniVGGT_nuScenes_omnivggt_finetune/2026-04-17_21-49-57_work1v2_vol0.002_epoch7/checkpoints/epoch_7-step_55000/" # 260203SingleFramesVol0002Epoch3Iter20000 260203SingleFramesVol0002Epoch5Iter30000
+PRETRAINED_PATH = "outputs/exp_OmniVGGT_nuScenes_omnivggt_finetune/2026-04-24_10-27-16_distill_recon_dwsplat_woLora_wg_e5s1w2_vol0.024scale0.03+5.0/checkpoints/epoch_5-step_40000_safe/" # 260203SingleFramesVol0002Epoch3Iter20000 260203SingleFramesVol0002Epoch5Iter30000
 DATASET_ROOT = "datasets/nuscenes/processed_10Hz/trainval2" # UPDATE THIS 
 VAL_LIST_PATH = "datasets/nuscenes/processed_10Hz/trainval2/nuScenes_Val.txt" # UPDATE THIS
 FLAG_bf16 = True # Whether to use bfloat16 for inference (requires compatible GPU and PyTorch version)
 # Output path generation
-SAVE_ROOT_BASE = f"./renders_val{'' if RENDER_WIDTH else '_ogwidth'}_work1v2_omni_e7s5w5_vol0.002_{TARGET_WIDTH}px{'_bf16' if FLAG_bf16 else ''}"
+SAVE_ROOT_BASE = f"./renders_val{'' if RENDER_WIDTH else '_ogwidth'}_work1v2_omni_e5s4w_vol0.025_{TARGET_WIDTH}px{'_bf16' if FLAG_bf16 else ''}"
 if ENABLE_FUSION:
     folder_suffix = f"fusion_{FUSION_METHOD}_{BLEND_EDGE_WIDTH}px"
 else:
@@ -145,14 +150,61 @@ def two_band_blending(render_img, gt_img, mask, blur_sigma=5):
     result_high = gt_high * mask + render_high * (1 - mask)
     return result_low + result_high
 
+
+def load_anysplat_local(export_dir: str, device: torch.device) -> AnySplat:
+    """Load local AnySplat export directory produced by change_weights.py.
+
+    Expected files in export_dir:
+    - config.json
+    - model.safetensors (preferred) or pytorch_model.bin
+    """
+    export_path = Path(export_dir)
+    cfg_path = export_path / "config.json"
+    if not cfg_path.exists():
+        raise FileNotFoundError(f"Missing config.json in {export_path}")
+
+    with open(cfg_path, "r", encoding="utf-8") as f:
+        cfg = json.load(f)
+
+    encoder_cfg = from_dict(
+        data_class=EncoderAnySplatCfg,
+        data=cfg["encoder_cfg"],
+        config=Config(cast=[tuple]),
+    )
+    decoder_cfg = from_dict(
+        data_class=DecoderSplattingCUDACfg,
+        data=cfg["decoder_cfg"],
+        config=Config(cast=[tuple]),
+    )
+    print_log_every_n_steps = int(cfg.get("print_log_every_n_steps", 50))
+
+    model = AnySplat(encoder_cfg, decoder_cfg, print_log_every_n_steps)
+
+    safetensor_path = export_path / "model.safetensors"
+    pytorch_bin_path = export_path / "pytorch_model.bin"
+    if safetensor_path.exists():
+        state_dict = load_safetensors(str(safetensor_path), device="cpu")
+    elif pytorch_bin_path.exists():
+        state_dict = torch.load(str(pytorch_bin_path), map_location="cpu")
+    else:
+        raise FileNotFoundError(
+            f"Missing model.safetensors/pytorch_model.bin in {export_path}"
+        )
+
+    missing_keys, unexpected_keys = model.load_state_dict(state_dict, strict=False)
+    print("Missing keys:", missing_keys)
+    print("Unexpected keys:", unexpected_keys)
+
+    return model.to(device)
+
 # ================= Main =================
 
 def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     print(f"Loading model from {PRETRAINED_PATH}...")
-    # Load model
-    model = AnySplat.from_pretrained(PRETRAINED_PATH).to(device)
+    # Load model from local exported folder (config.json + safetensors/bin)
+    model = load_anysplat_local(PRETRAINED_PATH, device)
     model.eval()
     for param in model.parameters():
         param.requires_grad = False

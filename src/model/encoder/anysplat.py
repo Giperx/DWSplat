@@ -163,6 +163,8 @@ def strip_prefix_from_state_dict(state_dict: dict, prefix: str) -> dict:
     for key, value in state_dict.items():
         if key.startswith(prefix):
             stripped_state_dict[key[len(prefix):]] = value
+        elif key.startswith(f"."):
+            stripped_state_dict[key[1:]] = value
         else:
             stripped_state_dict[key] = value
     return stripped_state_dict
