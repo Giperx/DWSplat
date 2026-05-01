@@ -1,3 +1,5 @@
 opacity:
-  weight: 0.1
-  type: exp+mean
+  weight: 1.0 # og 0.1
+  weight_mask: 1.0
+  weight_binary: 1.0
+  type: mean

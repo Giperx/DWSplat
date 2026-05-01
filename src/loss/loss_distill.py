@@ -70,21 +70,27 @@ def huber_loss(x, y, delta=1.0):
     return flag * 0.5 * diff**2 + (1 - flag) * delta * (abs_diff - 0.5 * delta)
 
 class DistillLoss(nn.Module):
-    def __init__(self, delta=1.0, gamma=0.6, weight_pose=1.0, weight_depth=1.0, weight_normal=1.0, weight_depth_l1=0.5, weight_depth_gradient=0.5, weight_depth_norm_head_mse=0.5, weight_depth_norm_head_gradient=0.5, weight_depth_scale=0.1, distill_warmup_steps=3000, distill_warmup_start=0.2, distill_warmup_end=1.0):
+    def __init__(self, delta=1.0, gamma=0.6, weight_pose=1.0, weight_depth=1.0, weight_normal=1.0, weight_depth_gradient=0.5, weight_depth_norm_head_mse=0.5, weight_depth_norm_head_gradient=0.5, weight_depth_scale=0.1, weight_depth_l1=0.0, weight_depth_edge_aware_log_l1=0.0, weight_depth_edge_aware_gradient=0.0, distill_warmup_steps=3000, distill_warmup_start=0.2, distill_warmup_end=1.0, weight_depth_decay_start_step=20000, weight_depth_decay_end_step=100000, weight_depth_decay_initial=0.05, weight_depth_decay_final=0.01):
         super().__init__()
         self.delta = delta
         self.gamma = gamma
         self.weight_pose = weight_pose
         self.weight_depth = weight_depth
         self.weight_normal = weight_normal
-        self.weight_depth_l1 = weight_depth_l1
         self.weight_depth_gradient = weight_depth_gradient
         self.weight_depth_norm_head_mse = weight_depth_norm_head_mse
         self.weight_depth_norm_head_gradient = weight_depth_norm_head_gradient
         self.weight_depth_scale = weight_depth_scale
+        self.weight_depth_edge_aware_log_l1 = weight_depth_edge_aware_log_l1
+        self.weight_depth_l1 = weight_depth_l1
+        self.weight_depth_edge_aware_gradient = weight_depth_edge_aware_gradient
         self.distill_warmup_steps = distill_warmup_steps
         self.distill_warmup_start = distill_warmup_start
         self.distill_warmup_end = distill_warmup_end
+        self.weight_depth_decay_start_step = weight_depth_decay_start_step
+        self.weight_depth_decay_end_step = weight_depth_decay_end_step
+        self.weight_depth_decay_initial = weight_depth_decay_initial
+        self.weight_depth_decay_final = weight_depth_decay_final
 
     def get_distill_warmup_scale(self, global_step, device):
         if self.distill_warmup_steps <= 0:
@@ -102,8 +108,9 @@ class DistillLoss(nn.Module):
         grad_x_diff = diff[:, :, :, 1:] - diff[:, :, :, :-1]
         grad_y_diff = diff[:, :, 1:, :] - diff[:, :, :-1, :]
 
-        mask_x = target_valid_mask[:, :, :, 1:] * target_valid_mask[:, :, :, :-1]
-        mask_y = target_valid_mask[:, :, 1:, :] * target_valid_mask[:, :, :-1, :]
+        # Use & for boolean logic, then convert to float for arithmetic
+        mask_x = (target_valid_mask[:, :, :, 1:] & target_valid_mask[:, :, :, :-1]).float()
+        mask_y = (target_valid_mask[:, :, 1:, :] & target_valid_mask[:, :, :-1, :]).float()
 
         grad_x_diff = grad_x_diff * mask_x
         grad_y_diff = grad_y_diff * mask_y
@@ -116,11 +123,94 @@ class DistillLoss(nn.Module):
         num_valid = mask_x.sum() + mask_y.sum()
 
         if num_valid == 0:
-            gradient_loss = 0
-        else:
-            gradient_loss = (loss_x + loss_y) / (num_valid + 1e-6)
-        
+            return torch.tensor(0.0, device=gs_depth.device)
+
+        gradient_loss = (loss_x + loss_y) / (num_valid + 1e-6)
         return gradient_loss
+
+    def edge_aware_log_l1_loss(self, pred_depth, target_depth, rgb, target_valid_mask, beta=15.0):
+        if pred_depth.ndim == 5 and pred_depth.shape[2] == 1:
+            pred_depth = pred_depth.squeeze(2)
+        if target_depth.ndim == 5 and target_depth.shape[2] == 1:
+            target_depth = target_depth.squeeze(2)
+        if target_valid_mask.ndim == 5 and target_valid_mask.shape[2] == 1:
+            target_valid_mask = target_valid_mask.squeeze(2)
+
+        if pred_depth.ndim == 4:
+            pred_depth = pred_depth.flatten(0, 1)
+        if target_depth.ndim == 4:
+            target_depth = target_depth.flatten(0, 1)
+        if target_valid_mask.ndim == 4:
+            target_valid_mask = target_valid_mask.flatten(0, 1)
+
+        logl1 = torch.log(1 + torch.abs(pred_depth - target_depth))
+        
+        if rgb.ndim == 5: # B, V, 3, H, W
+            rgb = rgb.flatten(0, 1)
+        if rgb.shape[1] == 3: # (B*V), 3, H, W
+            rgb = rgb.permute(0, 2, 3, 1) # (B*V), H, W, 3
+            
+        grad_img_x = torch.mean(torch.abs(rgb[:, :, :-1, :] - rgb[:, :, 1:, :]), -1)
+        grad_img_y = torch.mean(torch.abs(rgb[:, :-1, :, :] - rgb[:, 1:, :, :]), -1)
+        
+        lambda_x = torch.exp(-grad_img_x * beta)
+        lambda_y = torch.exp(-grad_img_y * beta)
+        
+        loss_x = lambda_x * logl1[:, :, :-1]
+        loss_y = lambda_y * logl1[:, :-1, :]
+        
+        mask_x = target_valid_mask[:, :, :-1] & target_valid_mask[:, :, 1:]
+        mask_y = target_valid_mask[:, :-1, :] & target_valid_mask[:, 1:, :]
+        
+        loss_x = loss_x[mask_x]
+        loss_y = loss_y[mask_y]
+        
+        if loss_x.numel() == 0 or loss_y.numel() == 0:
+            return torch.tensor(0.0, device=pred_depth.device)
+            
+        return loss_x.mean() + loss_y.mean()
+
+    def edge_aware_gradient_loss(self, pred_depth, target_depth, rgb, target_valid_mask, beta=15.0):
+        if pred_depth.ndim == 5 and pred_depth.shape[2] == 1:
+            pred_depth = pred_depth.squeeze(2)
+        if target_depth.ndim == 5 and target_depth.shape[2] == 1:
+            target_depth = target_depth.squeeze(2)
+        if target_valid_mask.ndim == 5 and target_valid_mask.shape[2] == 1:
+            target_valid_mask = target_valid_mask.squeeze(2)
+
+        if pred_depth.ndim == 4:
+            pred_depth = pred_depth.flatten(0, 1)
+        if target_depth.ndim == 4:
+            target_depth = target_depth.flatten(0, 1)
+        if target_valid_mask.ndim == 4:
+            target_valid_mask = target_valid_mask.flatten(0, 1)
+
+        diff = pred_depth - target_depth
+        
+        grad_x_diff = diff[:, :, :-1] - diff[:, :, 1:]
+        grad_y_diff = diff[:, :-1, :] - diff[:, 1:, :]
+        
+        if rgb.ndim == 5: # B, V, 3, H, W
+            rgb = rgb.flatten(0, 1)
+        if rgb.shape[1] == 3: # (B*V), 3, H, W
+            rgb = rgb.permute(0, 2, 3, 1) # (B*V), H, W, 3
+            
+        grad_img_x = torch.mean(torch.abs(rgb[:, :, :-1, :] - rgb[:, :, 1:, :]), -1)
+        grad_img_y = torch.mean(torch.abs(rgb[:, :-1, :, :] - rgb[:, 1:, :, :]), -1)
+        
+        lambda_x = torch.exp(-grad_img_x * beta)
+        lambda_y = torch.exp(-grad_img_y * beta)
+        
+        mask_x = target_valid_mask[:, :, :-1] & target_valid_mask[:, :, 1:]
+        mask_y = target_valid_mask[:, :-1, :] & target_valid_mask[:, 1:, :]
+        
+        grad_x_filtered = grad_x_diff[mask_x] * lambda_x[mask_x]
+        grad_y_filtered = grad_y_diff[mask_y] * lambda_y[mask_y]
+        
+        if grad_x_filtered.numel() == 0 and grad_y_filtered.numel() == 0:
+            return torch.tensor(0.0, device=pred_depth.device)
+        
+        return (grad_x_filtered.abs().mean() + grad_y_filtered.abs().mean())
 
     def align_mask_to_ref(self, mask, ref):
         if ref.ndim == 5 and ref.shape[-1] == 1:
@@ -137,7 +227,7 @@ class DistillLoss(nn.Module):
 
     def scale_anchor_loss(self, pred_depth, target_depth, target_valid_mask):
         if target_valid_mask.sum() == 0:
-            return pred_depth.new_tensor(0.0)
+            target_valid_mask = torch.ones_like(target_valid_mask, dtype=torch.bool)
         pred_sel = pred_depth[target_valid_mask]
         target_sel = target_depth[target_valid_mask]
         pred_med = pred_sel.median()
@@ -190,23 +280,65 @@ class DistillLoss(nn.Module):
         
         pred_depth = prediction.depth
         pesudo_gt_depth = depth_dict['distill_infos']['depth_map'].squeeze(-1)
-        conf_mask = depth_dict['distill_infos']['conf_mask']
+        # Detach and convert to bool to avoid autograd issues
+        conf_mask = depth_dict['distill_infos']['conf_mask'].detach().bool()
+        
+        car_cam_mask = batch["context"]["car_cam_mask"]
+        if car_cam_mask.dim() == 5 and car_cam_mask.shape[2] == 1:
+            car_cam_mask = car_cam_mask[:, :, 0]
+        conf_mask = conf_mask & car_cam_mask.bool().detach()
+        
         if batch['context']['valid_mask'].sum() > 0:
-            conf_mask = batch['context']['valid_mask']
+            conf_mask = batch['context']['valid_mask'].detach().bool()
         conf_mask = self.align_mask_to_ref(conf_mask, pred_depth)
+        if conf_mask.sum() == 0:
+            conf_mask = torch.ones_like(conf_mask, dtype=torch.bool)
+        
 
+        
         distill_scale = self.get_distill_warmup_scale(global_step, pred_depth.device)
+        
+        # Calculate dynamic weight for depth_l1 based on global_step
+        if global_step < self.weight_depth_decay_start_step:
+            current_weight_depth_l1 = self.weight_depth_decay_initial
+        else:
+            decay_progress = min(
+                (global_step - self.weight_depth_decay_start_step)
+                / max(self.weight_depth_decay_end_step - self.weight_depth_decay_start_step, 1),
+                1.0,
+            )
+            current_weight_depth_l1 = (
+                self.weight_depth_decay_initial
+                + decay_progress * (self.weight_depth_decay_final - self.weight_depth_decay_initial)
+            )
             
+        # depth_loss_l1 = torch.tensor(0.0, device=pred_depth.device)
         depth_loss_l1 = (
-            torch.abs(pred_depth[conf_mask] - pesudo_gt_depth[conf_mask]).mean()
+            torch.abs(pred_depth - pesudo_gt_depth)[conf_mask].mean()
         ) * self.weight_depth_l1 * self.weight_depth * distill_scale
+        
+        decay_ratio = current_weight_depth_l1 / self.weight_depth_decay_initial
+        # depth_loss_gradient = torch.tensor(0.0, device=pred_depth.device)
         depth_loss_gradient = (
             self.gradient_loss(pred_depth, pesudo_gt_depth, conf_mask)
-        ) * self.weight_depth_gradient * self.weight_depth * distill_scale
+        ) * self.weight_depth_gradient * self.weight_depth * distill_scale * decay_ratio
         depth_loss_scale = (
             self.scale_anchor_loss(pred_depth, pesudo_gt_depth, conf_mask)
         ) * self.weight_depth_scale * self.weight_depth * distill_scale
-        loss_depth = depth_loss_l1 + depth_loss_gradient + depth_loss_scale
+
+        rgb = (batch["context"]["image"] + 1) / 2
+        # debug print
+        # print("shape_rgb:", rgb.shape, "shape_conf_mask:", conf_mask.shape, "shape_pred_depth:", pred_depth.shape, "shape_pesudo_gt_depth:", pesudo_gt_depth.shape)
+        # shape_rgb: torch.Size([1, 3, 3, 294, 518]) shape_conf_mask: torch.Size([1, 3, 294, 518]) shape_pred_depth: torch.Size([1, 3, 294, 518]) shape_pesudo_gt_depth: torch.Size([1, 3, 294, 518])
+        depth_loss_edge_aware_log_l1 = (
+            self.edge_aware_log_l1_loss(pred_depth, pesudo_gt_depth, rgb, conf_mask, beta=15.0)
+        ) * self.weight_depth_edge_aware_log_l1 * self.weight_depth * distill_scale * decay_ratio
+        
+        depth_loss_edge_aware_gradient = (
+            self.edge_aware_gradient_loss(pred_depth, pesudo_gt_depth, rgb, conf_mask, beta=15.0)
+        ) * self.weight_depth_edge_aware_gradient * self.weight_depth * distill_scale * decay_ratio
+
+        loss_depth = depth_loss_l1 + depth_loss_gradient + depth_loss_scale + depth_loss_edge_aware_log_l1 + depth_loss_edge_aware_gradient
         
         pred_depth =pred_depth.flatten(0, 1)
         pesudo_gt_depth = pesudo_gt_depth.flatten(0, 1)
@@ -221,6 +353,8 @@ class DistillLoss(nn.Module):
         if pesudo_gt_depth_from_head.ndim == 5 and pesudo_gt_depth_from_head.shape[-1] == 1:
             pesudo_gt_depth_from_head = pesudo_gt_depth_from_head.squeeze(-1)
         conf_mask_norm = self.align_mask_to_ref(conf_mask, pred_depth_from_head)
+        if conf_mask_norm.sum() == 0:
+            conf_mask_norm = torch.ones_like(conf_mask_norm, dtype=torch.bool)
         # print("shape_pred_depth_from_head:", pred_depth_from_head.shape, "shape_pesudo_gt_depth_from_head:", pesudo_gt_depth_from_head.shape, "shape_conf_mask:", conf_mask.shape)
         loss_depth_norm_head_gradient = (
             self.gradient_loss(pred_depth_from_head, pesudo_gt_depth_from_head, conf_mask_norm)
@@ -249,6 +383,8 @@ class DistillLoss(nn.Module):
             "loss_depth_l1": depth_loss_l1,
             "loss_depth_gradient": depth_loss_gradient,
             "loss_depth_scale": depth_loss_scale,
+            "loss_depth_edge_aware_log_l1": depth_loss_edge_aware_log_l1,
+            "loss_depth_edge_aware_gradient": depth_loss_edge_aware_gradient,
             # "loss_normal": loss_normal * self.weight_normal
         }
 

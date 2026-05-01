@@ -78,6 +78,6 @@ trainer:
 
 hydra:
   run:
-    dir: output-debug/exp_${wandb.name}/${now:%Y-%m-%d_%H-%M-%S}
+    dir: output-debug/exp_${wandb.name}/${oc.env:DWSplat_SYNCED_TS,${now:%Y-%m-%d_%H-%M-%S}}
   # run:
     # dir: outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}_rank${oc.env:LOCAL_RANK,0}

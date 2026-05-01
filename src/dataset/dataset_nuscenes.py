@@ -17,7 +17,7 @@ from .shims.augmentation_shim import apply_augmentation_shim
 from .shims.crop_shim import apply_crop_shim
 from .types import Stage
 from .view_sampler import ViewSampler
-
+import torch.nn.functional as F
 from ..model.encoder.vggt.utils.geometry import closed_form_inverse_se3
 
 logger = logging.getLogger(__name__)
@@ -85,7 +85,14 @@ class DatasetNuScenes(Dataset):
     # Camera groups for sampling
     CAM_GROUP_FRONT = [0, 1, 2] # FRONT, FRONT_LEFT, FRONT_RIGHT
     CAM_GROUP_BACK = [5, 4, 3]  # BACK, BACK_RIGHT, BACK_LEFT (Ordered for visual consistency if needed)
-
+    CAM_ID_TO_NAME = {
+        0: "CAM_FRONT",
+        1: "CAM_FRONT_LEFT",
+        2: "CAM_FRONT_RIGHT",
+        3: "CAM_BACK_LEFT",
+        4: "CAM_BACK_RIGHT",
+        5: "CAM_BACK",
+    }
     def __init__(
         self,
         cfg: DatasetNuScenesCfg,
@@ -354,6 +361,82 @@ class DatasetNuScenes(Dataset):
         
         return self.mask_to_tensor(image) # batch, v, h, w
 
+
+    def _read_car_cam_mask(self, cam_id: int) -> torch.Tensor:
+        """Read a camera-specific car mask used to filter invalid pixels."""
+        cam_name = self.CAM_ID_TO_NAME[cam_id]
+        file_path = Path(__file__).resolve().parents[2] / "config" / "nuscenes_mask" / f"{cam_name}_mask.png"
+        if not file_path.exists():
+            return torch.ones((1, self.TARGET_HEIGHT, self.TARGET_WIDTH), dtype=torch.float32)
+
+        image = Image.open(file_path).convert('L')
+        image = image.resize((self.TARGET_WIDTH, self.TARGET_HEIGHT), Image.NEAREST)
+        return self.mask_to_tensor(image)
+    
+    
+    def _load_depth_map(self, scene_path: Path, timestep: int, cam_id: int) -> np.ndarray | None:
+        file_path = scene_path / "depth_map" / f"{timestep:03d}_{cam_id}.npz"
+        if not file_path.exists():
+            return None
+
+        data = np.load(file_path, allow_pickle=True)
+        if "depth" in data:
+            depth = data["depth"]
+        else:
+            depth = data[data.files[0]]
+
+        depth = np.asarray(depth, dtype=np.float32)
+        if depth.ndim == 3 and depth.shape[-1] == 1:
+            depth = depth[..., 0]
+        return depth
+
+    def _sparse_lidar_map_downsampler(
+        self,
+        lidar_depth_map: torch.Tensor,
+        downscale_factor: float | tuple[float, float],
+    ) -> torch.Tensor:
+        """Downsample sparse lidar depth with area pooling and valid-count normalization."""
+        raw_avg = F.interpolate(
+            lidar_depth_map.unsqueeze(0).unsqueeze(0),
+            scale_factor=downscale_factor,
+            mode="area",
+        ).squeeze(0).squeeze(0)
+        raw_mask = F.interpolate(
+            (lidar_depth_map > 1e-3).float().unsqueeze(0).unsqueeze(0),
+            scale_factor=downscale_factor,
+            mode="area",
+        ).squeeze(0).squeeze(0)
+
+        downsampled = torch.zeros_like(raw_avg)
+        valid = raw_mask > 0
+        downsampled[valid] = raw_avg[valid] / raw_mask[valid]
+        return downsampled
+
+    def _resize_depth_sparse_area(self, depth: np.ndarray | None, shape: tuple[int, int]) -> np.ndarray | None:
+        """Resize sparse depth maps with nearest upsampling and area-based downsampling."""
+        if depth is None:
+            return None
+
+        depth_np = np.asarray(depth, dtype=np.float32).squeeze()
+        if depth_np.ndim != 2:
+            raise ValueError(f"Expected sparse depth to be 2D after squeeze, got {depth_np.shape}")
+
+        out_h, out_w = int(shape[0]), int(shape[1])
+        in_h, in_w = depth_np.shape
+        depth_t = torch.from_numpy(depth_np)[None, None]
+
+        if out_h >= in_h and out_w >= in_w:
+            resized = F.interpolate(depth_t, size=(out_h, out_w), mode="nearest")
+            return resized[0, 0].cpu().numpy().astype(np.float32)
+
+        scale_h = out_h / float(in_h)
+        scale_w = out_w / float(in_w)
+        resized = self._sparse_lidar_map_downsampler(
+            depth_t.squeeze(0).squeeze(0),
+            downscale_factor=(scale_h, scale_w),
+        )
+        return resized.cpu().numpy().astype(np.float32)
+    
     def __len__(self) -> int:
         return len(self.samples)
 
@@ -390,6 +473,9 @@ class DatasetNuScenes(Dataset):
         # masks = []
         extrinsics = []
         intrinsics = []
+        depth_maps = []
+        depth_valid_masks = []
+        car_cam_masks = []
         # depthmaps_omnivggt = []
         # masks_omnivggt = []
         # depth_indices = [] # 暂时没用，没有使用到depth map
@@ -426,6 +512,17 @@ class DatasetNuScenes(Dataset):
                     # mask_tensor = self._load_mask(scene_path, ts, cid)
                     # masks.append(mask_tensor)
                     
+                    # Load sparse depth GT if available
+                    depth_np = self._load_depth_map(scene_path, ts, cid)
+                    depth_np = self._resize_depth_sparse_area(depth_np, (self.TARGET_HEIGHT, self.TARGET_WIDTH))
+                    if depth_np is None:
+                        depth_maps.append(torch.zeros((self.TARGET_HEIGHT, self.TARGET_WIDTH), dtype=torch.float32))
+                        depth_valid_masks.append(torch.zeros((self.TARGET_HEIGHT, self.TARGET_WIDTH), dtype=torch.bool))
+                    else:
+                        depth_tensor = torch.from_numpy(depth_np).to(torch.float32)
+                        depth_maps.append(depth_tensor)
+                        depth_valid_masks.append(depth_tensor > 1e-3)
+                                            
                     # Load Extrinsics
                     ext = self._read_extrinsics(scene_path, ts, cid)
                     extrinsics.append(ext)
@@ -433,6 +530,9 @@ class DatasetNuScenes(Dataset):
                     # Intrinsics
                     intr = cam_intrinsics_map[cid].copy()
                     intrinsics.append(intr)
+
+                    # Load camera-specific mask
+                    car_cam_masks.append(self._read_car_cam_mask(cid))
                     
                     ### add for omni-vggt
                     # depthmap = np.zeros((final_height, new_width), dtype=np.float32)
@@ -451,6 +551,9 @@ class DatasetNuScenes(Dataset):
             # masks = torch.stack(masks)   # (N_views, 1, H, W)
             extrinsics = torch.from_numpy(np.stack(extrinsics)) # (N_views, 4, 4)
             intrinsics = torch.from_numpy(np.stack(intrinsics)) # (N_views, 3, 3)
+            depth_maps = torch.stack(depth_maps)   # (N_views, H, W)
+            depth_valid_masks = torch.stack(depth_valid_masks)   # (N_views, H, W)
+            car_cam_masks = torch.stack(car_cam_masks) # (N_views, 1, H, W)
             # depthmaps_omnivggt = torch.stack(depthmaps_omnivggt) # (N_views, H, W)
             # masks_omnivggt = torch.stack(masks_omnivggt) # (N_views, H, W)
 
@@ -554,6 +657,9 @@ class DatasetNuScenes(Dataset):
                     "extrinsics": extrinsics[indices],
                     "intrinsics": normalized_intrinsics[indices],
                     "image": images[indices],
+                    "depth": depth_maps[indices],
+                    "depth_valid_mask": depth_valid_masks[indices],
+                    "car_cam_mask": car_cam_masks[indices],
                     # "fine_dynamic_masks": masks[indices], # Added field
                     # "depth": torch.zeros_like(images[indices])[:, 0], # Placeholder depth
                     "near": self.get_bound("near", len(indices)) / scale,

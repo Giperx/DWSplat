@@ -366,7 +366,7 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
                     param.data = param.data.cpu()
         
         if self.freeze_backbone:
-            for module in [self.aggregator, self.depth_head]:
+            for module in [self.aggregator]:
                 for param in module.parameters():
                     param.requires_grad = False
         elif cfg.use_lora_aggregator:
@@ -633,6 +633,7 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
             with torch.no_grad():    
                 # Process with bfloat16 precision
                 with torch.amp.autocast("cuda", enabled=True, dtype=torch.bfloat16):
+                # with torch.amp.autocast("cuda", enabled=False):
                     distill_aggregated_tokens_list, distill_patch_start_idx = (
                         self.distill_aggregator(
                             distill_image,
@@ -799,6 +800,7 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
         camera_gt_index = list(range(V)) # fixed
 
         with torch.amp.autocast("cuda", enabled=True, dtype=torch.bfloat16):
+        # with torch.amp.autocast("cuda", enabled=False):
             extrinsic = batch["context"]["extrinsics"]
             intrinsic = batch["context"]["intrinsics"]
             # print("intput int:rinsic:", intrinsic)
@@ -940,6 +942,25 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
                 neural_feats_list.append(neural_feats)
                 neural_pts_list.append(neural_pts)
 
+        def ensure_min_voxels(feats: Tensor, pts: Tensor, min_voxels: int = 2) -> tuple[Tensor, Tensor]:
+            if pts.shape[0] >= min_voxels:
+                return feats, pts
+
+            if pts.shape[0] == 0:
+                feats = torch.zeros((min_voxels, *feats.shape[1:]), device=feats.device, dtype=feats.dtype)
+                pts = torch.zeros((min_voxels, *pts.shape[1:]), device=pts.device, dtype=pts.dtype)
+                return feats, pts
+
+            repeat_factor = min_voxels // pts.shape[0] + int(min_voxels % pts.shape[0] != 0)
+            feats = feats.repeat((repeat_factor, *([1] * (feats.ndim - 1))))[:min_voxels].contiguous()
+            pts = pts.repeat((repeat_factor, *([1] * (pts.ndim - 1))))[:min_voxels].contiguous()
+            return feats, pts
+
+        neural_feats_list = [] if len(neural_feats_list) == 0 else neural_feats_list
+        neural_pts_list = [] if len(neural_pts_list) == 0 else neural_pts_list
+        neural_feats_list = [ensure_min_voxels(feats, pts)[0] for feats, pts in zip(neural_feats_list, neural_pts_list)]
+        neural_pts_list = [ensure_min_voxels(feats, pts)[1] for feats, pts in zip(neural_feats_list, neural_pts_list)]
+
         max_voxels = max(f.shape[0] for f in neural_feats_list)
         neural_feats = self.pad_tensor_list(
             neural_feats_list, (max_voxels,), value=-1e10
@@ -963,7 +984,6 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
             densities = neural_feats[..., 0].sigmoid()
         
         assert len(densities.shape) == 2, "the shape of densities should be (B, N)"
-        assert neural_pts.shape[1] > 1, "the number of voxels should be greater than 1"
 
         opacity = self.map_pdf_to_opacity(densities, global_step).squeeze(-1)
         if self.cfg.opacity_conf:

@@ -45,6 +45,9 @@ def reflect_views(views: AnyViews) -> AnyViews:
             "image": views["image"].flip(-1),
             "extrinsics": reflect_extrinsics(views["extrinsics"]),
             "depth": views["depth"].flip(-1),
+            "depth_valid_mask": views["depth_valid_mask"].flip(-1),
+            "car_cam_mask": views["car_cam_mask"].flip(-1),
+            # "fine_dynamic_masks": views["fine_dynamic_masks"].flip(-1),
         }
     else:
         return {
@@ -62,6 +65,7 @@ def apply_augmentation_shim(
     # Do not augment with 50% chance.
     if torch.rand(tuple(), generator=generator) < 0.5:
         return example
+
 
     return {
         **example,

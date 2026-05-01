@@ -127,6 +127,12 @@ class LossDepthConsis(Loss[LossDepthConsisCfg, LossDepthConsisCfgWrapper]):
         #     valid_mask = valid_mask & conf_valid_mask
         if self.cfg.not_use_valid_mask:
             valid_mask = torch.ones_like(valid_mask, device=valid_mask.device)
+        
+        car_cam_mask = batch["context"]["car_cam_mask"]
+        if car_cam_mask.dim() == 5 and car_cam_mask.shape[2] == 1:
+            car_cam_mask = car_cam_mask[:, :, 0]
+        valid_mask = valid_mask & car_cam_mask.bool()
+        
         pred_depth = depth_dict['depth'].squeeze(-1)
         if self.cfg.detach:
             pred_depth = pred_depth.detach()

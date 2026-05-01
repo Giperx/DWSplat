@@ -96,11 +96,17 @@ class TrainCfg:
     weight_pose: float = 1.0
     weight_depth: float = 1.0
     weight_normal: float = 1.0
-    weight_depth_l1: float = 0.5
-    weight_depth_gradient: float = 0.5
     weight_depth_norm_head_mse: float = 0.5
     weight_depth_norm_head_gradient: float = 0.5
+    weight_depth_gradient: float = 0.5
     weight_depth_scale: float = 0.1
+    weight_depth_edge_aware_log_l1: float = 0.0
+    weight_depth_l1: float = 0.0
+    weight_depth_edge_aware_gradient: float = 0.0
+    depth_decay_start_step: int = 20000
+    depth_decay_initial: float = 0.05
+    depth_decay_final: float = 0.01
+    depth_decay_end_step: int = 100000
     render_ba: bool = False
     render_ba_after_step: int = 0
 
@@ -156,14 +162,20 @@ class ModelWrapper(LightningModule):
                 weight_pose=self.train_cfg.weight_pose,
                 weight_depth=self.train_cfg.weight_depth,
                 weight_normal=self.train_cfg.weight_normal,
-                weight_depth_l1=self.train_cfg.weight_depth_l1,
                 weight_depth_gradient=self.train_cfg.weight_depth_gradient,
                 weight_depth_norm_head_mse=self.train_cfg.weight_depth_norm_head_mse,
                 weight_depth_norm_head_gradient=self.train_cfg.weight_depth_norm_head_gradient,
                 weight_depth_scale=self.train_cfg.weight_depth_scale,
+                weight_depth_edge_aware_log_l1=self.train_cfg.weight_depth_edge_aware_log_l1,
+                weight_depth_l1=self.train_cfg.weight_depth_l1,
+                weight_depth_edge_aware_gradient=self.train_cfg.weight_depth_edge_aware_gradient,
                 distill_warmup_steps=self.train_cfg.distill_warmup_steps,
                 distill_warmup_start=self.train_cfg.distill_warmup_start,
                 distill_warmup_end=self.train_cfg.distill_warmup_end,
+                weight_depth_decay_start_step=self.train_cfg.depth_decay_start_step,
+                weight_depth_decay_end_step=self.train_cfg.depth_decay_end_step,
+                weight_depth_decay_initial=self.train_cfg.depth_decay_initial,
+                weight_depth_decay_final=self.train_cfg.depth_decay_final,
             )
 
         # This is used for testing.
@@ -311,6 +323,8 @@ class ModelWrapper(LightningModule):
                 self.log("loss/distill_depth_l1", loss_distill_list['loss_depth_l1'])
                 self.log("loss/distill_depth_gradient", loss_distill_list['loss_depth_gradient'])
                 self.log("loss/distill_depth_scale", loss_distill_list['loss_depth_scale'])
+                self.log("loss/distill_depth_edge_aware_log_l1", loss_distill_list['loss_depth_edge_aware_log_l1'])
+                self.log("loss/distill_depth_edge_aware_gradient", loss_distill_list['loss_depth_edge_aware_gradient'])
                 # self.log("loss/distill_normal", loss_distill_list['loss_normal'])
                 total_loss = total_loss + loss_distill_list['loss_distill']
                 
@@ -319,6 +333,8 @@ class ModelWrapper(LightningModule):
                 loss_breakdown.append(f"distill_depth_l1={loss_distill_list['loss_depth_l1'].detach().float().item():.6f}")
                 loss_breakdown.append(f"distill_depth_gradient={loss_distill_list['loss_depth_gradient'].detach().float().item():.6f}")
                 loss_breakdown.append(f"distill_depth_scale={loss_distill_list['loss_depth_scale'].detach().float().item():.6f}")
+                loss_breakdown.append(f"distill_edge_logl1={loss_distill_list['loss_depth_edge_aware_log_l1'].detach().float().item():.6f}")
+                loss_breakdown.append(f"distill_edge_grad={loss_distill_list['loss_depth_edge_aware_gradient'].detach().float().item():.6f}")
                 loss_breakdown.append(f"distill_depth_norm_head_mse={loss_distill_list['loss_depth_norm_head_mse'].detach().float().item():.6f}")
                 loss_breakdown.append(f"distill_depth_norm_head_gradient={loss_distill_list['loss_depth_norm_head_gradient'].detach().float().item():.6f}")
 
@@ -333,8 +349,8 @@ class ModelWrapper(LightningModule):
 
         # Skip batch if loss is too high after certain step
         SKIP_AFTER_STEP = 3000 
-        LOSS_THRESHOLD = 0.2
-        if self.global_step > SKIP_AFTER_STEP and total_loss > LOSS_THRESHOLD:
+        LOSS_THRESHOLD = 5.0
+        if self.global_step > SKIP_AFTER_STEP and (total_loss > LOSS_THRESHOLD or (distill_infos is not None and torch.isnan(distill_infos['scene_scale']).any())):
             print(f"Skipping batch with high loss ({total_loss:.6f}) at step {self.global_step} on Rank {self.global_rank}")
             # set to a really small number
             return total_loss * 1e-10
@@ -351,7 +367,9 @@ class ModelWrapper(LightningModule):
                 f"psnr_probabilistic = {psnr_probabilistic.mean():.2f}; "
             )
             if loss_breakdown:
-                print(f"loss breakdown: {', '.join(loss_breakdown)}; total={total_loss.detach().float().item():.6f}")
+                non_zero_breakdown = [x for x in loss_breakdown if not x.endswith("=0.000000")]
+                if non_zero_breakdown:
+                    print(f"loss breakdown: {', '.join(non_zero_breakdown)}; total={total_loss.detach().float().item():.6f}")
             
         self.log("info/global_step", self.global_step)  # hack for ckpt monitor
         
@@ -560,12 +578,15 @@ class ModelWrapper(LightningModule):
         rgb_pred_metric = rearrange(rgb_pred, "b v c h w -> (b v) c h w")
 
         psnr = compute_psnr(rgb_gt_metric, rgb_pred_metric).mean()
-        self.log(f"val/psnr", psnr)
+
         lpips = compute_lpips(rgb_gt_metric, rgb_pred_metric).mean()
-        self.log(f"val/lpips", lpips)
+        # self.log(f"val/lpips", lpips)
         ssim = compute_ssim(rgb_gt_metric, rgb_pred_metric).mean()
-        self.log(f"val/ssim", ssim)
+        # self.log(f"val/ssim", ssim)
         if is_rank0:
+            self.log(f"val/psnr", psnr)
+            self.log(f"val/lpips", lpips)
+            self.log(f"val/ssim", ssim)
             print("psnr, lpips, ssim:", psnr, lpips, ssim)
         
         # depth metrics
@@ -605,8 +626,9 @@ class ModelWrapper(LightningModule):
         render_normal = rearrange(render_normal, "(b v) c h w -> b v c h w", b=b, v=v)
         pred_normal = rearrange(pred_normal, "(b v) c h w -> b v c h w", b=b, v=v)
         
-        is_rank0 = True
-        if is_rank0:
+        # All ranks save validation images to the same timestamp-synced folder.
+        # DistributedSampler ensures each rank processes different batches, avoiding filename conflicts.
+        if True:
             for sample_idx in range(b):
                 # Construct comparison image for each sample in the batch.
                 context_img = inverse_normalize(batch["context"]["image"][sample_idx])
@@ -676,7 +698,7 @@ class ModelWrapper(LightningModule):
 
 
         # add 验证时就可以输出宽视野图像
-        if is_rank0:
+        if True:
             _, output_wide = self.model(
                 batch,
                 self.global_step,

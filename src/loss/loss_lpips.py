@@ -46,6 +46,13 @@ class LossLpips(Loss[LossLpipsCfg, LossLpipsCfgWrapper]):
         static_flag: bool = False,
     ) -> Float[Tensor, ""]:
         image = (batch["context"]["image"] + 1) / 2
+        alpha = prediction.alpha
+        mask = torch.ones_like(alpha, device=alpha.device).bool() # 默认情况mask为全1
+        
+        # car_cam_mask = batch["context"]["car_cam_mask"]
+        # if car_cam_mask.dim() == 5 and car_cam_mask.shape[2] == 1:
+        #     car_cam_mask = car_cam_mask[:, :, 0]
+        # mask = mask.bool() & car_cam_mask.bool()
         
         # Before the specified step, don't apply the loss.
         if global_step < self.cfg.apply_after_step:
@@ -60,6 +67,7 @@ class LossLpips(Loss[LossLpipsCfg, LossLpipsCfgWrapper]):
                 mask = depth_dict['conf_valid_mask']
             b, v, c, h, w = prediction.color.shape
             expanded_mask = mask.unsqueeze(2).expand(-1, -1, c, -1, -1)
+            
             masked_pred = prediction.color * expanded_mask
             masked_img = image * expanded_mask
             
@@ -69,6 +77,11 @@ class LossLpips(Loss[LossLpipsCfg, LossLpipsCfgWrapper]):
                 normalize=True,
             )
         else:
+            b, v, c, h, w = prediction.color.shape
+            expanded_mask = mask.unsqueeze(2).expand(-1, -1, c, -1, -1)
+            
+            masked_pred = prediction.color * expanded_mask
+            masked_img = image * expanded_mask
             loss = self.lpips.forward(
                 rearrange(prediction.color, "b v c h w -> (b v) c h w"),
                 rearrange(image, "b v c h w -> (b v) c h w"),

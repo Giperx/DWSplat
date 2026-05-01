@@ -29,7 +29,7 @@ class LossDepthGTCfg:
 
 @dataclass
 class LossDepthGTCfgWrapper:
-    depthgt: LossDepthGTCfg
+    depth_gt: LossDepthGTCfg
 
 
 class LossDepthGT(Loss[LossDepthGTCfg, LossDepthGTCfgWrapper]):
@@ -39,8 +39,9 @@ class LossDepthGT(Loss[LossDepthGTCfg, LossDepthGTCfgWrapper]):
         grad_x_diff = diff[:, :, :, 1:] - diff[:, :, :, :-1]
         grad_y_diff = diff[:, :, 1:, :] - diff[:, :, :-1, :]
 
-        mask_x = target_valid_mask[:, :, :, 1:] * target_valid_mask[:, :, :, :-1]
-        mask_y = target_valid_mask[:, :, 1:, :] * target_valid_mask[:, :, :-1, :]
+        # Use & for boolean logic, then convert to float for arithmetic
+        mask_x = (target_valid_mask[:, :, :, 1:] & target_valid_mask[:, :, :, :-1]).float()
+        mask_y = (target_valid_mask[:, :, 1:, :] & target_valid_mask[:, :, :-1, :]).float()
 
         grad_x_diff = grad_x_diff * mask_x
         grad_y_diff = grad_y_diff * mask_y
@@ -53,10 +54,9 @@ class LossDepthGT(Loss[LossDepthGTCfg, LossDepthGTCfgWrapper]):
         num_valid = mask_x.sum() + mask_y.sum()
 
         if num_valid == 0:
-            gradient_loss = 0
-        else:
-            gradient_loss = (loss_x + loss_y) / (num_valid + 1e-6)
-        
+            return torch.tensor(0.0, device=gs_depth.device)
+
+        gradient_loss = (loss_x + loss_y) / (num_valid + 1e-6)
         return gradient_loss
     
     def forward(
@@ -64,7 +64,9 @@ class LossDepthGT(Loss[LossDepthGTCfg, LossDepthGTCfgWrapper]):
         prediction: DecoderOutput,
         batch: BatchedExample,
         gaussians: Gaussians,
-        global_step: int,
+        depth_dict: dict,
+        global_step: int = 0,
+        static_flag: bool = False,
     ) -> Float[Tensor, ""]:
         # Scale the depth between the near and far planes.
 
@@ -72,10 +74,24 @@ class LossDepthGT(Loss[LossDepthGTCfg, LossDepthGTCfgWrapper]):
         # target: B, H, W, C
         # mask: B, H, W
         
-        target_depth = batch["target"]["depth"]
-        target_valid_mask = batch["target"]["valid_mask"]
+        # target_depth = batch["target"]["depth"]
+        # target_valid_mask = batch["target"]["valid_mask"]
         gs_depth = prediction.depth.clamp(1e-3)
         
+        target_depth = batch["context"]["depth"].to(prediction.depth.device)
+        if "depth_valid_mask" in batch["context"]:
+            target_valid_mask = batch["context"]["depth_valid_mask"].to(prediction.depth.device).bool()
+        else:
+            target_valid_mask = (target_depth > 1e-3)
+
+        if "valid_mask" in batch["context"] and batch["context"]["valid_mask"].sum() > 0:
+            target_valid_mask = target_valid_mask & batch["context"]["valid_mask"].to(prediction.depth.device).bool()
+
+        car_cam_mask = batch["context"]["car_cam_mask"]
+        if car_cam_mask.dim() == 5 and car_cam_mask.shape[2] == 1:
+            car_cam_mask = car_cam_mask[:, :, 0]
+        target_valid_mask = target_valid_mask & car_cam_mask.bool()
+                    
         if self.cfg.type == "l1":
             depth_loss = torch.abs(target_depth[target_valid_mask] - gs_depth[target_valid_mask]).mean()
         elif self.cfg.type == "mse":

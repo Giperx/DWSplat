@@ -94,7 +94,7 @@ class LocalLogger(Logger):
     def log_metrics(self, metrics, step):
         pass
 
-    @rank_zero_only
+    # @rank_zero_only
     def log_image(
         self,
         key: str,

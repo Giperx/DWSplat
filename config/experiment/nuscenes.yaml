@@ -4,11 +4,11 @@ defaults:
   - /dataset@_group_.nuscenes: nuscenes
   - override /model/encoder: anysplat
   - override /model/encoder/backbone: croco
-  - override /loss: [mse, lpips, depth_consis] # ablate: opacity loss
+  - override /loss: [mse, lpips, depth_consis, depth_gt, opacity] # ablate: opacity loss
 
 wandb:
-  project: anysplat_04_sup_gs_Lora_distill_recon
-  name: nuScenes_omnivggt_finetune
+  project: 260501_distill_lora_recon
+  name: omnivggt_finetune
   tags: [nuScenes, 294x518]
   mode: disabled # online offline disabled
   tensorboard: true # only effective when mode=disabled; true -> log scalar curves to TensorBoard
@@ -26,9 +26,9 @@ model:
     gs_prune: false # ablate: opacity loss
     pred_head_type: depth
     freeze_backbone: false # means freeze aggregator and depth head
-    use_lora_aggregator: false # only when freeze_backbone is false, this flag is effective
+    use_lora_aggregator: true # only when freeze_backbone is false, this flag is effective
     freeze_patch_embed_in_lora: true # true: LoRA 不作用于 patch_embed 相关层
-    useOG_OmniVGGT: false
+    useOG_OmniVGGT: true
     export_pt_path: 'checkpoints/distill_recon_dwsplat/e5s1w2_distill_recon' # only when useOG_OmniVGGT is false, this path is effective
     # aggregator_merged.ckpt depth_head.ckpt
     distill: true
@@ -36,13 +36,13 @@ model:
     frozenGaussianHead: false
     useDGGTGaussianHead: false
     frozenDepthHead: false
-    NotUsePretrainedGaussianHead: false
-    gshead_pt_path: 'checkpoints/gshead_pt/merged_0202_epoch5/gaussian_param_head_weights.pth' # only when NotUsePretrainedGaussianHead is false, this path is effective
+    NotUsePretrainedGaussianHead: true
+    gshead_pt_path: 'checkpoints/gshead_pt/distill_recon_dwsplat_woLora_wg_e5s1w2_vol0.024scale0.03+5.0/gaussian_param_head.pt' # only when NotUsePretrainedGaussianHead is false, this path is effective
     min_depth: 1.5
     max_depth: 110.0
     render_conf: false
     conf_threshold: 0.1
-    freeze_module: all # only when freeze_backbone and use_lora_aggregator is false, this flag is effective; patch_embed means only freeze patch_embed; none means not freeze
+    freeze_module: patch_embed # only when freeze_backbone and use_lora_aggregator is false, this flag is effective; patch_embed means only freeze patch_embed; none means not freeze
     voxelize: true
     intermediate_layer_idx: [4, 11, 17, 23]
     enable_high_conf_supplement: false
@@ -56,14 +56,14 @@ dataset:
       num_target_views: 3
       # min_distance_between_context_views: 32
       # max_distance_between_context_views: 256
-      max_img_per_gpu: 15
+      max_img_per_gpu: 9
     avg_pose: false
     intr_augment: false
     normalize_by_pts3d: false
     rescale_to_1cube: false
 
 optimizer:
-  lr: 6e-5 
+  lr: 3e-5 
   # 2e-4 and 24 per gpu, 16 gpus
   # 1gpu, 9imgs, 3e-5    linear scale: 4.6e-6
   # 4gpu, 9imgs, 6e-5    linear scale: 1.8e-5
@@ -72,6 +72,7 @@ optimizer:
   # 4gpu ,24imgs, 1e-4    linear scale: 5e-5  4307
   # 4gpu, 15imgs, 7.9e-5 linear scale: 3.125e-5 6892
   # 2gpu, 15imgs, 5.5e-5 linear scale: 1.56e-5 13785
+  # 4gpu, 12imgs, 7e-5    linear scale: 2.5e-5 10459
   warm_up_steps: 2000
   backbone_lr_multiplier: 0.1 #0.1
 
@@ -80,20 +81,20 @@ data_loader:
     batch_size: 4 # not used here
     
 trainer:
-  max_steps: 50000
+  max_steps: 100000
   val_check_interval: 1000
   log_every_n_steps: 20
-  print_log_every_n_steps: 50
+  print_log_every_n_steps: 20
   num_nodes: 1
   accumulate_grad_batches: 1
-  precision: "bf16-mixed" #"32" bf16-mixed
+  precision: "32" #"32" bf16-mixed
 
 checkpointing:
   load: null
   # load: outputs/exp_OmniVGGT_nuScenes_omnivggt_finetune/2026-04-23_23-51-21/checkpoints/epoch_3-step_25000.ckpt
-  log_save_dir: outputs/exp_OmniVGGT_${wandb.name}/${now:%Y-%m-%d_%H-%M-%S}
+  log_save_dir: outputs/${wandb.project}/${wandb.name}/${oc.env:DWSplat_SYNCED_TS,${now:%Y-%m-%d_%H-%M-%S}}
   flag_gaussian_head: true # 是否读取Gaussian Head的权重
-  every_n_train_steps: 5000
+  every_n_train_steps: 10000
   save_weights_only: false
   save_top_k: 100
   
@@ -101,32 +102,45 @@ train:
   pose_loss_alpha: 0.0
   pose_loss_delta: 0.0
   cxt_depth_weight: 0.0
-  weight_pose: 1.0 #10.0
-  weight_depth: 1.0 # loss_depth_l1 + loss_depth_gradient
-  weight_depth_l1: 0.02 # gs render depth and distill depth-head metric depth
-  weight_depth_gradient: 0.0 # gs render depth and distill depth-head metric depth  
-  weight_depth_norm_head_mse: 0.05 # depth-head norm depth adn distill depth-head norm depth
-  weight_depth_norm_head_gradient: 0.00 # depth-head norm depth adn distill depth-head norm depth
-  weight_depth_scale: 0.02 # explicit median-scale anchor to prevent scene scale collapse
   weight_normal: 0.0
+  weight_pose: 0.0 #10.0
   distill_warmup_steps: 1000
   distill_warmup_start: 0.4
   distill_warmup_end: 1.0
+  weight_depth: 1.0 # loss_depth_l1 + loss_depth_gradient
+  weight_depth_gradient: 0.0 # gs render depth and distill depth-head metric depth  
+  weight_depth_norm_head_mse: 0.0 # depth-head norm depth adn distill depth-head norm depth
+  weight_depth_norm_head_gradient: 0.00 # depth-head norm depth adn distill depth-head norm depth
+  weight_depth_scale: 0.0 # explicit median-scale anchor to prevent scene scale collapse
+  weight_depth_l1: 0.0 
+  weight_depth_edge_aware_log_l1: 0.05
+  weight_depth_edge_aware_gradient: 0.05
+  depth_decay_initial: 0.05  
+  depth_decay_final: 0.0001
+  depth_decay_start_step: 20000 # # for l1 and gradient
+  depth_decay_end_step: 50000
+
 
 hydra:
   run:
-    dir: outputs/exp_OmniVGGT_${wandb.name}/${now:%Y-%m-%d_%H-%M-%S}
+    dir: outputs/${wandb.project}/${wandb.name}/${oc.env:DWSplat_SYNCED_TS,${now:%Y-%m-%d_%H-%M-%S}}
 
 loss:
   mse:
     weight: 1.0
     conf: false
-    loss_type: mse
+    loss_type: l1
   lpips:
-    weight: 0.05
+    weight: 0.1
     conf: false
   depth_consis:
-    weight: 0.001 # 
+    weight: 0.005 # 
     loss_type: MSE
-
-
+  depth_gt:
+    weight: 0.05 #
+    loss_type: l1
+  opacity:
+    weight: 0.01
+    weight_mask: 1.0
+    weight_binary: 1.0
+    type: mean

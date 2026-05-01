@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from datetime import datetime
 
 import hydra
 import torch
@@ -50,6 +51,63 @@ def cyan(text: str) -> str:
     return f"{Fore.CYAN}{text}{Fore.RESET}"
 
 
+def _get_synced_timestamp() -> str:
+    """Generate a timestamp that is consistent across all DDP ranks.
+
+    When multiple processes (ranks) are launched simultaneously by torchrun,
+    ``datetime.now()`` may return slightly different seconds across ranks,
+    causing each rank to write into a different timestamp-named folder.
+
+    This function uses a temporary marker file on the shared filesystem so
+    that rank 0 writes the authoritative timestamp and the remaining ranks
+    read it back.
+
+    Returns:
+        A timestamp string in ``YYYY-MM-DD_HH-MM-SS`` format.
+    """
+    import time
+    from datetime import datetime
+    from pathlib import Path
+
+    world_size = int(os.environ.get("WORLD_SIZE", "1"))
+    if world_size <= 1:
+        return datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+
+    # Use a per-job sync file identified by the master address/port pair
+    master_addr = os.environ.get("MASTER_ADDR", "127.0.0.1")
+    master_port = os.environ.get("MASTER_PORT", "29500")
+    job_key = f"{master_addr}_{master_port}"
+
+    sync_dir = Path("/tmp/dwsplat_ts_sync")
+    sync_dir.mkdir(exist_ok=True)
+    sync_file = sync_dir / f"ts_{job_key}.txt"
+
+    rank = int(os.environ.get("RANK", "0"))
+    if rank == 0:
+        ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        sync_file.write_text(ts)
+        # Garbage-collect old sync files (older than 24 hours)
+        cutoff = time.time() - 86400
+        for f in sync_dir.glob("ts_*.txt"):
+            try:
+                if f.stat().st_mtime < cutoff:
+                    f.unlink(missing_ok=True)
+            except OSError:
+                pass
+        return ts
+
+    # Non-zero ranks: spin-wait for rank 0 to create the marker file
+    for _ in range(600):  # ≈60 s timeout (10 Hz)
+        if sync_file.exists():
+            ts = sync_file.read_text().strip()
+            if ts:
+                return ts
+        time.sleep(0.1)
+
+    # Last-resort fallback — should rarely be reached
+    return datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+
+
 @hydra.main(
     version_base=None,
     config_path="../config",
@@ -60,6 +118,8 @@ def train(cfg_dict: DictConfig):
     set_cfg(cfg_dict)
     
     # Set up the output directory.
+    # Hydra now uses DWSplat_SYNCED_TS env var (set before @hydra.main runs)
+    # to create a timestamp folder that is identical across all DDP ranks.
     output_dir = Path(
         hydra.core.hydra_config.HydraConfig.get()["runtime"]["output_dir"]
     )
@@ -84,15 +144,14 @@ def train(cfg_dict: DictConfig):
         if wandb.run is not None:
             wandb.run.log_code("src")
     else:
-        from datetime import datetime
-        real_now = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        real_now = os.environ.get("DWSplat_SYNCED_TS", datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
         old_dir = str(cfg.checkpointing.log_save_dir) 
         log_dir = old_dir.replace(
-            "${now:%Y-%m-%d_%H-%M-%S}",  # 旧时间戳
-            real_now                                      
+            "${oc.env:DWSplat_SYNCED_TS,${now:%Y-%m-%d_%H-%M-%S}}", real_now
         ).replace(
-            "${wandb.name}",
-            cfg_dict.wandb.name
+            "${wandb.project}", cfg_dict.wandb.project
+        ).replace(
+            "${wandb.name}", cfg_dict.wandb.name
         )
         if _is_rank_zero():
             from src.misc.LocalLogger import enable_console_log
@@ -226,4 +285,11 @@ def train(cfg_dict: DictConfig):
 
 
 if __name__ == "__main__":
+    # ---- Sync timestamp across DDP ranks BEFORE Hydra resolves ${now:...} ----
+    # Hydra spawns subprocesses (via Lightning DDP) that each re-resolve
+    # the config independently.  Setting a shared timestamp as an env var
+    # before Hydra sees the config guarantees all ranks use the same folder.
+    import os as _os
+    if "DWSplat_SYNCED_TS" not in _os.environ:
+        _os.environ["DWSplat_SYNCED_TS"] = _get_synced_timestamp()
     train()

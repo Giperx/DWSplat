@@ -76,7 +76,7 @@ train:
 
 hydra:
   run:
-    dir: output/exp_${wandb.name}/${now:%Y-%m-%d_%H-%M-%S}
+    dir: output/exp_${wandb.name}/${oc.env:DWSplat_SYNCED_TS,${now:%Y-%m-%d_%H-%M-%S}}
 
 loss:
   mse:
