@@ -1,0 +1,3 @@
+projection:
+  weight: 0.1
+  norm_mode: mean_std

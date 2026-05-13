@@ -4,7 +4,7 @@ defaults:
   - /dataset@_group_.nuscenes: nuscenes
   - override /model/encoder: anysplat
   - override /model/encoder/backbone: croco
-  - override /loss: [mse, lpips, depth_consis, opacity] # ablate: opacity loss
+  - override /loss: [mse, lpips, depth_consis, opacity, projection, depth_gt]
 
 wandb:
   project: 2605_distill_lora_omnivggt
@@ -31,7 +31,7 @@ model:
     useOG_OmniVGGT: true
     export_pt_path: 'checkpoints/distill_recon_dwsplat/e5s1w2_distill_recon' # only when useOG_OmniVGGT is false, this path is effective
     # aggregator_merged.ckpt depth_head.ckpt
-    distill: true
+    distill: false
     frozenAggregator: true # not used
     frozenGaussianHead: false
     useDGGTGaussianHead: false
@@ -52,11 +52,11 @@ dataset:
   nuscenes:
     input_image_shape: [294, 518] # [252, 448] [294, 518]
     view_sampler:
-      num_context_views: 3 # keep same with numTimes x 3
+      num_context_views: 3 # context = ts2 only (3 cameras)
       num_target_views: 3
       # min_distance_between_context_views: 32
       # max_distance_between_context_views: 256
-      max_img_per_gpu: 9
+      max_img_per_gpu: 3
     avg_pose: false
     intr_augment: false
     normalize_by_pts3d: false
@@ -138,10 +138,13 @@ loss:
     weight: 0.01 # 
     loss_type: MSE
   depth_gt:
-    weight: 0.00 #
+    weight: 0.05 #
     loss_type: l1
   opacity:
     weight: 0.01
     weight_mask: 1.0
     weight_binary: 1.0
     type: mean
+  projection:
+    weight: 1.0
+    norm_mode: mean_std

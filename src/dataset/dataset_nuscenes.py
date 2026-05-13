@@ -256,7 +256,7 @@ class DatasetNuScenes(Dataset):
                     'scene_id': scene_id,
                     'start_idx': i,
                     # 'timesteps': timesteps[i : i + required_frames]
-                    'timesteps': timesteps[i : i + required_frames][::-1] ### 让最新帧排首位
+                    'timesteps': timesteps[i : i + required_frames]
                 })
             
             valid_scenes += 1
@@ -337,29 +337,13 @@ class DatasetNuScenes(Dataset):
         return self.to_tensor(image)
 
     def _load_mask(self, scene_path: Path, timestep: int, cam_id: int) -> torch.Tensor:
-        # file_path = scene_path / "fine_dynamic_masks" / "all" / f"{timestep:03d}_{cam_id}.png"
-        file_path = scene_path / "fine_dynamic_masks" / f"{timestep:03d}_{cam_id}.png"
+        file_path = scene_path / "fine_dynamic_masks" / "all" / f"{timestep:03d}_{cam_id}.png"
         if not file_path.exists():
-            # If mask doesn't exist, return ones (all valid) or zeros depending on usage
-            # Assuming 1 is valid/static, 0 is dynamic/masked? Or vice versa.
-            # Usually masks: 0 for ignore, 1 for keep. Or dynamic masks: 1 is dynamic object.
-            # Returning a default mask of ones (assuming full image is valid static) if missing
-            # return torch.ones((1, self.TARGET_SIZE, self.TARGET_SIZE), dtype=torch.float32)
-            return torch.ones((0, self.TARGET_HEIGHT, self.TARGET_WIDTH), dtype=torch.float32)
+            return torch.ones((1, self.TARGET_HEIGHT, self.TARGET_WIDTH), dtype=torch.float32)
 
         image = Image.open(file_path).convert('L') # Grayscale
-        
-        # if self.cfg.input_image_shape[0] == self.TARGET_SIZE and self.cfg.input_image_shape[1] == self.TARGET_SIZE:
-        #     image = image.resize((self.TARGET_SIZE, self.TARGET_SIZE), Image.NEAREST)
-        # if self.cfg.input_image_shape[0] == self.TARGET_HEIGHT and self.cfg.input_image_shape[1] == self.TARGET_WIDTH:
         image = image.resize((self.TARGET_WIDTH, self.TARGET_HEIGHT), Image.NEAREST)
-        ### debug save image
-        # debug_save_path = Path("debug_masks") / f"{timestep:03d}_{cam_id}.png"
-        # os.makedirs(debug_save_path.parent, exist_ok=True)
-        # print(f"*********Debug saving mask to {debug_save_path}")
-        # image.save(debug_save_path)
-        
-        return self.mask_to_tensor(image) # batch, v, h, w
+        return self.mask_to_tensor(image) # (1, H, W)
 
 
     def _read_car_cam_mask(self, cam_id: int) -> torch.Tensor:
@@ -374,6 +358,18 @@ class DatasetNuScenes(Dataset):
         return self.mask_to_tensor(image)
     
     
+    def _read_ego_pose(self, scene_path: Path, timestep: int) -> np.ndarray:
+        """Read 4x4 ego pose (ego-to-global transform) for a given timestep."""
+        file_path = scene_path / "ego_pose" / f"{timestep:03d}.txt"
+        try:
+            data = np.loadtxt(file_path, dtype=np.float32)
+            if data.shape != (4, 4):
+                raise ValueError(f"Expected 4x4 matrix, got {data.shape}")
+            return data
+        except Exception as e:
+            logger.error(f"Error reading ego_pose {file_path}: {e}")
+            raise
+
     def _load_depth_map(self, scene_path: Path, timestep: int, cam_id: int) -> np.ndarray | None:
         file_path = scene_path / "depth_map" / f"{timestep:03d}_{cam_id}.npz"
         if not file_path.exists():
@@ -470,12 +466,12 @@ class DatasetNuScenes(Dataset):
         # Order: Frame 1 (Cam A, B, C), Frame 2 (Cam A, B, C)... 
         
         images = []
-        # masks = []
         extrinsics = []
         intrinsics = []
         depth_maps = []
         depth_valid_masks = []
         car_cam_masks = []
+        dynamic_masks = []
         # depthmaps_omnivggt = []
         # masks_omnivggt = []
         # depth_indices = [] # 暂时没用，没有使用到depth map
@@ -533,6 +529,9 @@ class DatasetNuScenes(Dataset):
 
                     # Load camera-specific mask
                     car_cam_masks.append(self._read_car_cam_mask(cid))
+
+                    # Load dynamic mask (1=static, 0=dynamic)
+                    dynamic_masks.append(self._load_mask(scene_path, ts, cid))
                     
                     ### add for omni-vggt
                     # depthmap = np.zeros((final_height, new_width), dtype=np.float32)
@@ -547,29 +546,48 @@ class DatasetNuScenes(Dataset):
                     # masks_omnivggt.append(mask_tensor_omnivggt)
 
             # Stack everything
-            images = torch.stack(images) # (N_views, 3, H, W)
-            # masks = torch.stack(masks)   # (N_views, 1, H, W)
-            extrinsics = torch.from_numpy(np.stack(extrinsics)) # (N_views, 4, 4)
-            intrinsics = torch.from_numpy(np.stack(intrinsics)) # (N_views, 3, 3)
-            depth_maps = torch.stack(depth_maps)   # (N_views, H, W)
-            depth_valid_masks = torch.stack(depth_valid_masks)   # (N_views, H, W)
-            car_cam_masks = torch.stack(car_cam_masks) # (N_views, 1, H, W)
-            # depthmaps_omnivggt = torch.stack(depthmaps_omnivggt) # (N_views, H, W)
-            # masks_omnivggt = torch.stack(masks_omnivggt) # (N_views, H, W)
+            images = torch.stack(images) # (9, 3, H, W)
+            extrinsics_raw = torch.from_numpy(np.stack(extrinsics)) # (9, 4, 4) cam2ego
+            intrinsics = torch.from_numpy(np.stack(intrinsics)) # (9, 3, 3)
+            depth_maps = torch.stack(depth_maps)   # (9, H, W)
+            depth_valid_masks = torch.stack(depth_valid_masks)   # (9, H, W)
+            car_cam_masks = torch.stack(car_cam_masks) # (9, 1, H, W)
+            dynamic_masks = torch.stack(dynamic_masks) # (9, 1, H, W)
+
+            n_cams = len(cam_ids)
+
+            # --- Load ego poses (ego2world) and compute cam_T_cam for projection loss ---
+            # Original order: [0..2]=ts0, [3..5]=ts1, [6..8]=ts2
+            # Context = ts1 (position 1), aux = ts0 (position 0) + ts2 (position 2)
+            ego_poses = {}
+            for ts in timesteps:
+                ego_poses[ts] = torch.from_numpy(self._read_ego_pose(scene_path, ts))
+
+            # cam_T_cam: ref_cam -> src_cam
+            # = e2c_src @ inv(ego_pose_src) @ ego_pose_ref @ c2e_ref
+            ref_ts = timesteps[1]  # ts1 is the reference
+            ego_ref = ego_poses[ref_ts].float()
+            c2e_map = {}
+            for cid in cam_ids:
+                c2e_np = self._read_extrinsics(scene_path, timesteps[0], cid)
+                c2e_map[cid] = torch.from_numpy(c2e_np).float()
+
+            cam_T_cam_aux = []
+            aux_ts_list = [timesteps[0], timesteps[2]]  # ts0 (forward), ts2 (backward)
+            for aux_ts in aux_ts_list:
+                for cid in cam_ids:
+                    c2e_ref = c2e_map[cid]
+                    c2e_src = c2e_map[cid]
+                    e2c_src = torch.inverse(c2e_src)
+                    cam_T = e2c_src @ torch.inverse(ego_poses[aux_ts].float()) @ ego_ref @ c2e_ref
+                    cam_T_cam_aux.append(cam_T)
+            cam_T_cam_aux = torch.stack(cam_T_cam_aux)  # (6, 4, 4)
 
             # Determine original image size for normalization
-            # The provided intrinsics are based on original image size (likely)
-            # Need to know original dims. Assuming 1600x900 from previous code or determining from file
-            # Ideally read one image to get size, but for speed assume standard NuScenes
-            # original_w, original_h = 1600.0, 900.0 
             original_h, original_w = self.cfg.original_image_shape[0], self.cfg.original_image_shape[1]
 
             # Normalize Intrinsics and Resize Adjustment
             normalized_intrinsics = intrinsics.clone()
-            
-            # if self.cfg.input_image_shape[0] == self.TARGET_SIZE and self.cfg.input_image_shape[1] == self.TARGET_SIZE:
-            # if self.cfg.input_image_shape[0] == self.TARGET_HEIGHT and self.cfg.input_image_shape[1] == self.TARGET_WIDTH:
-            # Intrinsics are for 1600x900, we resized to TARGET_WIDTH x TARGET_HEIGHT, so we need to scale fx, fy, cx, cy accordingly.
             s_x = float(self.TARGET_WIDTH) / original_w
             s_y = float(self.TARGET_HEIGHT) / original_h
 
@@ -577,81 +595,31 @@ class DatasetNuScenes(Dataset):
             normalized_intrinsics[:, 1, 1] *= s_y # fy
             normalized_intrinsics[:, 0, 2] *= s_x # cx
             normalized_intrinsics[:, 1, 2] *= s_y # cy
-            
-            # Update current dimensions for normalization
-            # curr_w, curr_h = float(self.TARGET_SIZE), float(self.TARGET_SIZE)
-            curr_w, curr_h = float(self.TARGET_WIDTH), float(self.TARGET_HEIGHT)
-            # else:
-                # curr_w, curr_h = original_w, original_h
 
-            # 260412commnet: 不归一化，输入omnivggt中需要原始尺度的内参（内部extri_intri_to_pose_encoding会利用HW），后续在forward return时会进行归一化
-            # Normalize to 0-1 range for view_sampler or model input
-            # normalized_intrinsics[:, 0, 0] /= curr_w
-            # normalized_intrinsics[:, 1, 1] /= curr_h
-            # normalized_intrinsics[:, 0, 2] /= curr_w
-            # normalized_intrinsics[:, 1, 2] /= curr_h
-
-            # --- View Splitting (Context vs Target) ---
-            # Total views = 3 * numTimes
-            # We treat all loaded views as potential context/target candidates.
-            # The ViewSampler logic usually expects specific indices.
-            
-            # For simplicity in this loader, we can pass all loaded views to the sampler
-            # or split them here. Assuming standard random split from the loaded set.
-            
-            num_total_views = len(images)
-            all_indices = torch.arange(num_total_views)
-            
-            # Deterministic split: use every view as context and the first three as targets
-            context_indices = all_indices
-            target_indices = context_indices[:3]
-            if len(target_indices) == 0: # Handle numTimes=0 defensive case
-                target_indices = context_indices
+            # --- View Splitting: context = ts1, aux = ts0 + ts2 ---
+            # Original order: [0..2]=ts0, [3..5]=ts1, [6..8]=ts2
+            context_indices = torch.arange(n_cams, 2 * n_cams)  # ts1 views (position 1)
+            target_indices = context_indices
+            aux_indices = torch.cat([torch.arange(0, n_cams), torch.arange(2 * n_cams, 3 * n_cams)])  # ts0, ts2
 
             # --- Coordinate Normalization ---
-            
-            # 1. Baseline Scaling (based on context)
             scale = 1.0
             if self.cfg.make_baseline_1 and len(context_indices) > 1:
-                ctx_ext = extrinsics[context_indices]
-                # Simple heuristic: distance between first and last context camera
+                ctx_ext = extrinsics_raw[context_indices]
                 dist = (ctx_ext[0, :3, 3] - ctx_ext[-1, :3, 3]).norm()
                 scale = dist
-                if scale < 1e-6: scale = 1.0 # Avoid div by zero
-                extrinsics[:, :3, 3] /= scale
+                if scale < 1e-6: scale = 1.0
+                extrinsics_raw[:, :3, 3] /= scale
 
-            # 2. Relative Pose (Center scene around first context camera)
-            # if self.cfg.relative_pose and len(context_indices) > 0:
-            #     first_ctx_idx = context_indices[0]
-            #     # inv_pose = torch.inverse(extrinsics[first_ctx_idx])
-            #     # Apply inverse of first context cam to all
-            #     # T_new = T_inv * T_old
-            #     # Note: extrinsics are typically c2w. To make first cam identity at origin:
-            #     # New_c2w = First_c2w^-1 * Current_c2w
-            #     # Check your camera_normalization utility for exact math.
-            #     # Assuming simple matrix multiplication here for c2w
-                
-            #     # However, many implementations use w2c for normalization logic. 
-            #     # Let's assume standard behavior: transform world coords such that context[0] is at origin.
-            #     # World_new = Context0_w2c * World_old
-            #     # Cam_new_c2w = Context0_w2c * Cam_old_c2w
-            #     c2w_0 = extrinsics[first_ctx_idx]
-            #     w2c_0 = torch.inverse(c2w_0)
-            #     extrinsics = torch.matmul(w2c_0.unsqueeze(0), extrinsics)
-
-            # 3. Rescale to unit cube (fit all positions inside [-1, 1])
             if self.cfg.rescale_to_1cube:
-                max_pos = torch.max(torch.abs(extrinsics[:, :3, 3]))
+                max_pos = torch.max(torch.abs(extrinsics_raw[:, :3, 3]))
                 if max_pos > 0:
-                    extrinsics[:, :3, 3] /= max_pos
-                    scale *= max_pos # Track total scaling if needed for depth
+                    extrinsics_raw[:, :3, 3] /= max_pos
+                    scale *= max_pos
 
             # --- Construct Output ---
-            ### for omnivggt inverse extrinsics
-            # print("********** Debug: before inverse extrinsics shape:", extrinsics.shape) #torch.Size([3, 4, 4])
-            extrinsics = closed_form_inverse_se3(extrinsics)[:, :3, :]
-            # print("********** Debug: after inverse extrinsics shape:", extrinsics.shape) #torch.Size([3, 3, 4])
-            
+            extrinsics = closed_form_inverse_se3(extrinsics_raw)[:, :3, :]
+
             def build_subset(indices):
                 return {
                     "extrinsics": extrinsics[indices],
@@ -660,38 +628,37 @@ class DatasetNuScenes(Dataset):
                     "depth": depth_maps[indices],
                     "depth_valid_mask": depth_valid_masks[indices],
                     "car_cam_mask": car_cam_masks[indices],
-                    # "fine_dynamic_masks": masks[indices], # Added field
-                    # "depth": torch.zeros_like(images[indices])[:, 0], # Placeholder depth
+                    "dynamic_mask": dynamic_masks[indices],  # (V, 1, H, W), white(1)=dynamic, black(0)=static
                     "near": self.get_bound("near", len(indices)) / scale,
                     "far": self.get_bound("far", len(indices)) / scale,
                     "index": indices,
-                    # "depth": depthmaps_omnivggt[indices], # --- add for omni-vggt
-                    # "mask_omnivggt": masks_omnivggt[indices],
-                    # "camera_indices": camera_indices[indices],
-                    # "depth_indices": depth_indices[indices],
                 }
 
-            scene_id = scene_id + f"_ts{timesteps[0]:03d}_grp{'F' if use_front_group else 'B'}"
+            scene_id = scene_id + f"_ts{timesteps[1]:03d}_grp{'F' if use_front_group else 'B'}"
             example = {
                 "context": build_subset(context_indices),
                 "target": build_subset(target_indices),
                 "scene": f"nuscenes_{scene_id}",
+                # Auxiliary data for projection loss (ts0 + ts2)
+                "aux": {
+                    "image": images[aux_indices],
+                    "intrinsics": normalized_intrinsics[aux_indices],
+                    "car_cam_mask": car_cam_masks[aux_indices],
+                    "dynamic_mask": dynamic_masks[aux_indices],  # (6, 1, H, W), white(1)=dynamic, black(0)=static
+                    "cam_T_cam": cam_T_cam_aux,  # (6, 4, 4)
+                },
             }
-            
+
             # --- Augmentation ---
             if self.stage == "train" and self.cfg.augment:
                 example = apply_augmentation_shim(example)
 
-            ### delete crop shims
-            
-            # 占位符 3D 点和掩码
+            # Placeholder valid masks
             context_valid_mask = torch.ones_like(example["context"]["image"])[:, 0].bool()
-            
             target_valid_mask = torch.ones_like(example["target"]["image"])[:, 0].bool()
-            
-            example["context"]["valid_mask"] = context_valid_mask * 0 # 返回后续使用时，有batch维度，b v h w
+            example["context"]["valid_mask"] = context_valid_mask * 0
             example["target"]["valid_mask"] = target_valid_mask * 0
-            
+
             return example
 
         except Exception as e:
