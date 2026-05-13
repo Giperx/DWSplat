@@ -70,7 +70,7 @@ def huber_loss(x, y, delta=1.0):
     return flag * 0.5 * diff**2 + (1 - flag) * delta * (abs_diff - 0.5 * delta)
 
 class DistillLoss(nn.Module):
-    def __init__(self, delta=1.0, gamma=0.6, weight_pose=1.0, weight_depth=1.0, weight_normal=1.0, weight_depth_gradient=0.5, weight_depth_norm_head_mse=0.5, weight_depth_norm_head_gradient=0.5, weight_depth_scale=0.1, weight_depth_l1=0.0, weight_depth_edge_aware_log_l1=0.0, weight_depth_edge_aware_gradient=0.0, distill_warmup_steps=3000, distill_warmup_start=0.2, distill_warmup_end=1.0, weight_depth_decay_start_step=20000, weight_depth_decay_end_step=100000, weight_depth_decay_initial=0.05, weight_depth_decay_final=0.01):
+    def __init__(self, delta=1.0, gamma=0.6, weight_pose=1.0, weight_depth=1.0, weight_normal=1.0, weight_depth_gradient=0.5, weight_depth_norm_head_mse=0.5, weight_depth_norm_head_gradient=0.5, weight_depth_scale=0.1, weight_depth_l1=0.0, weight_depth_mse=0.0, weight_depth_edge_aware_log_l1=0.0, weight_depth_edge_aware_gradient=0.0, distill_warmup_steps=3000, distill_warmup_start=0.2, distill_warmup_end=1.0, weight_depth_decay_start_step=20000, weight_depth_decay_end_step=100000, weight_depth_decay_initial=0.05, weight_depth_decay_final=0.01):
         super().__init__()
         self.delta = delta
         self.gamma = gamma
@@ -83,6 +83,7 @@ class DistillLoss(nn.Module):
         self.weight_depth_scale = weight_depth_scale
         self.weight_depth_edge_aware_log_l1 = weight_depth_edge_aware_log_l1
         self.weight_depth_l1 = weight_depth_l1
+        self.weight_depth_mse = weight_depth_mse
         self.weight_depth_edge_aware_gradient = weight_depth_edge_aware_gradient
         self.distill_warmup_steps = distill_warmup_steps
         self.distill_warmup_start = distill_warmup_start
@@ -311,13 +312,12 @@ class DistillLoss(nn.Module):
                 self.weight_depth_decay_initial
                 + decay_progress * (self.weight_depth_decay_final - self.weight_depth_decay_initial)
             )
-            
+        decay_ratio = current_weight_depth_l1 / self.weight_depth_decay_initial
         # depth_loss_l1 = torch.tensor(0.0, device=pred_depth.device)
         depth_loss_l1 = (
             torch.abs(pred_depth - pesudo_gt_depth)[conf_mask].mean()
-        ) * self.weight_depth_l1 * self.weight_depth * distill_scale
+        ) * self.weight_depth_l1 * self.weight_depth * distill_scale * decay_ratio
         
-        decay_ratio = current_weight_depth_l1 / self.weight_depth_decay_initial
         # depth_loss_gradient = torch.tensor(0.0, device=pred_depth.device)
         depth_loss_gradient = (
             self.gradient_loss(pred_depth, pesudo_gt_depth, conf_mask)
@@ -325,7 +325,9 @@ class DistillLoss(nn.Module):
         depth_loss_scale = (
             self.scale_anchor_loss(pred_depth, pesudo_gt_depth, conf_mask)
         ) * self.weight_depth_scale * self.weight_depth * distill_scale
-
+        
+        depth_loss_mse = (F.mse_loss(pred_depth[conf_mask], pesudo_gt_depth[conf_mask], reduction='none').mean()) * self.weight_depth_mse * self.weight_depth * distill_scale * decay_ratio
+        
         rgb = (batch["context"]["image"] + 1) / 2
         # debug print
         # print("shape_rgb:", rgb.shape, "shape_conf_mask:", conf_mask.shape, "shape_pred_depth:", pred_depth.shape, "shape_pesudo_gt_depth:", pesudo_gt_depth.shape)
@@ -338,7 +340,7 @@ class DistillLoss(nn.Module):
             self.edge_aware_gradient_loss(pred_depth, pesudo_gt_depth, rgb, conf_mask, beta=15.0)
         ) * self.weight_depth_edge_aware_gradient * self.weight_depth * distill_scale * decay_ratio
 
-        loss_depth = depth_loss_l1 + depth_loss_gradient + depth_loss_scale + depth_loss_edge_aware_log_l1 + depth_loss_edge_aware_gradient
+        loss_depth = depth_loss_l1 + depth_loss_gradient + depth_loss_scale + depth_loss_edge_aware_log_l1 + depth_loss_edge_aware_gradient + depth_loss_mse
         
         pred_depth =pred_depth.flatten(0, 1)
         pesudo_gt_depth = pesudo_gt_depth.flatten(0, 1)
@@ -381,6 +383,7 @@ class DistillLoss(nn.Module):
             "loss_depth_norm_head_mse": loss_depth_norm_head_mse,
             "loss_depth_norm_head_gradient": loss_depth_norm_head_gradient,
             "loss_depth_l1": depth_loss_l1,
+            "loss_depth_mse": depth_loss_mse,
             "loss_depth_gradient": depth_loss_gradient,
             "loss_depth_scale": depth_loss_scale,
             "loss_depth_edge_aware_log_l1": depth_loss_edge_aware_log_l1,

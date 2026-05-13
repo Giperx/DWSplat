@@ -338,24 +338,13 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
         #             param.data = param.data.cpu()
         if self.distill: 
             # Initialize the model and load the pretrained weights.
-            distill_model = VGGT()
-            # model.load_state_dict(torch.load(ckpt/vggt.pt", map_location=device))
-            # Override only aggregator and depth_head with merged checkpoints.
-            aggregator_ckpt = "checkpoints/recondrive/merged_ckpts/aggregator_merged.ckpt"
-            depth_head_ckpt = "checkpoints/recondrive/merged_ckpts/depth_head.ckpt"
-
-            agg_state = load_ckpt_state_dict(aggregator_ckpt)
-            dep_state = load_ckpt_state_dict(depth_head_ckpt)
-
-            missing_agg, unexpected_agg = distill_model.aggregator.load_state_dict(agg_state, strict=False)
-            missing_dep, unexpected_dep = distill_model.depth_head.load_state_dict(dep_state, strict=False)
-            print(f"distill_model VGGT Loaded aggregator ckpt: {aggregator_ckpt}")
-            print(f"aggregator missing={len(missing_agg)}, unexpected={len(unexpected_agg)}")
-            print(f"distill_model VGGT Loaded depth_head ckpt: {depth_head_ckpt}")
-            print(f"depth_head missing={len(missing_dep)}, unexpected={len(unexpected_dep)}")
+            distill_model = OmniVGGT()
+            state_dict = load_file("./checkpoints/checkpoints/OmniVGGT.safetensors")
+            distill_model.load_state_dict(state_dict, strict=True)
+            print("Loaded distill model from OmniVGGT.safetensors")
             self.distill_aggregator = copy.deepcopy(distill_model.aggregator.to(torch.bfloat16))
             self.distill_depth_head = copy.deepcopy(distill_model.depth_head)
-            del agg_state, dep_state, distill_model
+            del distill_model
             
             for module in [
                 self.distill_aggregator,
@@ -620,6 +609,39 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
         device = image.device
         B, V, _, H, W = image.shape
         distill_infos = {}
+        depth_omni = torch.zeros((B, V, H, W, 1), device=device, dtype=torch.float32)
+        mask_omni = torch.zeros((B, V, H, W, 1), device=device, dtype=torch.float32)
+
+        # depth 不输入 gt，因此保持为空；camera 提供当前输入的 S 个视角的内外参作为条件，因此为 0 ~ S-1
+        depth_gt_index = []
+        
+        # 50% probability to use camera conditioning to improve generalization.
+        # Use a deterministic seed based on global_step (if training) to ensure all DDP ranks make the same decision.
+        # This keeps the workload balanced across GPUs in the same step.
+        camera_gt_index = []
+        
+        # We need a way to get the current training step. In Lightning, we can pass it or use a default.
+        # For simplicity and robustness in multi-GPU, we can check if the model is in training mode.
+        is_training = self.training
+        # To ensure all ranks are synchronized, we can't use random.random() directly if they might diverge.
+        # However, typically in DDP, the forward pass is called with the same step index.
+        # We use a simple hash of the images or a counter if available.
+        # Since this is a torch.nn.Module, we don't have easy access to 'global_step' here unless passed.
+        # But we can use the sum of images or a random seed that is synced.
+        
+        # Better: Use a fixed probability. Users often use a shared seed in DDP for such logic.
+        # if is_training:
+        #     # Deterministic decision across ranks using a simple torch generator sync'd by seed if needed, 
+        #     # or just use a shared random state. Most DDP setups seed all ranks identically at start.
+        #     if torch.rand(1).item() < 0.5:
+        #         camera_gt_index = list(range(V))
+        # else:
+        #     # Inference usually wants the best performance, so use camera conditioning.
+        #     camera_gt_index = list(range(V))
+        camera_gt_index = list(range(V)) # fixed
+        
+        extrinsic = batch["context"]["extrinsics"]
+        intrinsic = batch["context"]["intrinsics"]        
         
         if self.distill:
             distill_image = image.clone().detach()
@@ -630,34 +652,30 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
                 for param in module.parameters():
                     param.data = param.data.to(device, non_blocking=True)
             
-            with torch.no_grad():    
-                # Process with bfloat16 precision
-                with torch.amp.autocast("cuda", enabled=True, dtype=torch.bfloat16):
-                # with torch.amp.autocast("cuda", enabled=False):
-                    distill_aggregated_tokens_list, distill_patch_start_idx = (
-                        self.distill_aggregator(
-                            distill_image,
-                            intermediate_layer_idx=self.cfg.intermediate_layer_idx,
-                        )
-                    )
+            with torch.no_grad(): 
+                with torch.amp.autocast("cuda", enabled=True, dtype=torch.bfloat16):   
+                    distill_aggregated_tokens_list, _, distill_patch_start_idx = self.distill_aggregator(images = distill_image, 
+                                                                            extrinsics = extrinsic, 
+                                                                            intrinsics = intrinsic,
+                                                                            depth = depth_omni,
+                                                                            mask = mask_omni,
+                                                                            depth_gt_index = depth_gt_index,
+                                                                            camera_gt_index = camera_gt_index,
+                                                                            )      
+            with torch.amp.autocast("cuda", enabled=False):
+                distill_depth_map, distill_depth_conf = self.distill_depth_head(
+                    distill_aggregated_tokens_list,
+                    images=image,
+                    patch_start_idx=distill_patch_start_idx,
+                )
 
-                # Process with default precision
-                with torch.amp.autocast("cuda", enabled=False):
-                    # Get depth information
-                    distill_depth_map, distill_depth_conf = self.distill_depth_head(
-                        distill_aggregated_tokens_list,
-                        images=distill_image,
-                        patch_start_idx=distill_patch_start_idx,
-                    )            
-
-                # distill_depth_map = torch.nn.functional.sigmoid(torch.log(distill_depth_map))
-                distill_depth_map = torch.sigmoid(torch.log(torch.clamp(distill_depth_map, min=1e-6)))
+                distill_depth_map_norm = torch.sigmoid(torch.log(torch.clamp(distill_depth_map, min=1e-6)))
                 distill_infos["depth_map_norm"] = distill_depth_map.detach()
                 
                 min_depth = self.min_depth
                 max_depth = self.max_depth
                 depth_range = max_depth-min_depth
-                distill_depth_map = min_depth + depth_range * distill_depth_map
+                distill_depth_map = min_depth + depth_range * distill_depth_map_norm
                 distill_infos["depth_map"] = distill_depth_map.detach()
 
                 distill_pts_all = batchify_unproject_depth_map_to_point_map(
@@ -683,126 +701,11 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
                 del distill_aggregated_tokens_list, distill_patch_start_idx
                 del distill_depth_map, distill_depth_conf
                 torch.cuda.empty_cache()
-                            
-        # if self.distill:
-        #     distill_image = image.clone().detach()
-        #     distill_extrinsics = batch["context"]["extrinsics"].clone().detach()
-        #     distill_intrinsics = batch["context"]["intrinsics"].clone().detach()
-        #     distill_depth = batch["context"]["depth"].clone().detach()
-        #     distill_mask = batch["context"]["mask_omnivggt"].clone().detach()
-        #     distill_depth_gt_index = batch["context"]["depth_indices"].clone().detach()
-        #     distill_camera_gt_index = batch["context"]["camera_indices"].clone().detach()
-        #     for module in [
-        #         self.distill_aggregator,
-        #         self.distill_camera_head,
-        #         self.distill_depth_head,
-        #     ]:
-        #         for param in module.parameters():
-        #             param.data = param.data.to(device, non_blocking=True)
 
-        #     with torch.no_grad():
-        #         # Process with bfloat16 precision
-        #         with torch.amp.autocast("cuda", enabled=False):
-                     
-        #             # distill_aggregated_tokens_list, distill_image_tokens_list, distill_dino_token_list, distill_patch_start_idx = (
-        #             #     self.distill_aggregator(
-        #             #         distill_image.to(torch.bfloat16),
-        #             #         intermediate_layer_idx=self.cfg.intermediate_layer_idx,
-        #             #     )
-        #             # )
-        #             distill_aggregated_tokens_list, distill_image_tokens_list, distill_patch_start_idx = self.distill_aggregator(images = distill_image, 
-        #                                                                     extrinsics = distill_extrinsics, 
-        #                                                                     intrinsics = distill_intrinsics,
-        #                                                                     depth = distill_depth,
-        #                                                                     mask = distill_mask,
-        #                                                                     depth_gt_index = distill_depth_gt_index,
-        #                                                                     camera_gt_index = distill_camera_gt_index,
-        #                                                                     )                    
-                    
-        #         # Process with default precision
-        #         # with torch.amp.autocast("cuda", enabled=False):
-        #             # Get camera pose information
-        #             distill_pred_pose_enc_list = self.distill_camera_head(
-        #                 distill_aggregated_tokens_list
-        #             )
-        #             last_distill_pred_pose_enc = distill_pred_pose_enc_list[-1]
-        #             distill_extrinsic, distill_intrinsic = pose_encoding_to_extri_intri(
-        #                 last_distill_pred_pose_enc, image.shape[-2:]
-        #             )
-
-        #             # Get depth information
-        #             distill_depth_map, distill_depth_conf = self.distill_depth_head(
-        #                 distill_aggregated_tokens_list,
-        #                 images=distill_image,
-        #                 patch_start_idx=distill_patch_start_idx,
-        #             )
-
-        #             # Convert depth to 3D points
-        #             distill_pts_all = batchify_unproject_depth_map_to_point_map(
-        #                 distill_depth_map, distill_extrinsic, distill_intrinsic
-        #             )
-        #         # Store results
-        #         distill_infos["pred_pose_enc_list"] = distill_pred_pose_enc_list
-        #         distill_infos["pts_all"] = distill_pts_all
-        #         distill_infos["depth_map"] = distill_depth_map
-
-        #         conf_threshold = torch.quantile(
-        #             distill_depth_conf.flatten(2, 3), 0.3, dim=-1, keepdim=True
-        #         )  # Get threshold for each view
-        #         conf_mask = distill_depth_conf > conf_threshold.unsqueeze(-1)
-        #         distill_infos["conf_mask"] = conf_mask
-
-        #         for module in [
-        #             self.distill_aggregator,
-        #             self.distill_camera_head,
-        #             self.distill_depth_head,
-        #         ]:
-        #             for param in module.parameters():
-        #                 param.data = param.data.cpu()
-        #         # Clean up to save memory
-        #         del distill_aggregated_tokens_list, distill_patch_start_idx, distill_image_tokens_list#, distill_dino_token_list
-        #         del distill_pred_pose_enc_list, last_distill_pred_pose_enc
-        #         del distill_extrinsic, distill_intrinsic
-        #         del distill_depth_map, distill_depth_conf
-        #         torch.cuda.empty_cache()
-        # Create zero tensors for depth as we don't use GT depth as input
-        # depth: [B, S, H, W, 1]
-        depth_omni = torch.zeros((B, V, H, W, 1), device=device, dtype=torch.float32)
-        mask_omni = torch.zeros((B, V, H, W, 1), device=device, dtype=torch.float32)
-
-        # depth 不输入 gt，因此保持为空；camera 提供当前输入的 S 个视角的内外参作为条件，因此为 0 ~ S-1
-        depth_gt_index = []
-        
-        # 50% probability to use camera conditioning to improve generalization.
-        # Use a deterministic seed based on global_step (if training) to ensure all DDP ranks make the same decision.
-        # This keeps the workload balanced across GPUs in the same step.
-        camera_gt_index = []
-        
-        # We need a way to get the current training step. In Lightning, we can pass it or use a default.
-        # For simplicity and robustness in multi-GPU, we can check if the model is in training mode.
-        is_training = self.training
-        
-        # To ensure all ranks are synchronized, we can't use random.random() directly if they might diverge.
-        # However, typically in DDP, the forward pass is called with the same step index.
-        # We use a simple hash of the images or a counter if available.
-        # Since this is a torch.nn.Module, we don't have easy access to 'global_step' here unless passed.
-        # But we can use the sum of images or a random seed that is synced.
-        
-        # Better: Use a fixed probability. Users often use a shared seed in DDP for such logic.
-        # if is_training:
-        #     # Deterministic decision across ranks using a simple torch generator sync'd by seed if needed, 
-        #     # or just use a shared random state. Most DDP setups seed all ranks identically at start.
-        #     if torch.rand(1).item() < 0.5:
-        #         camera_gt_index = list(range(V))
-        # else:
-        #     # Inference usually wants the best performance, so use camera conditioning.
-        #     camera_gt_index = list(range(V))
-        camera_gt_index = list(range(V)) # fixed
 
         with torch.amp.autocast("cuda", enabled=True, dtype=torch.bfloat16):
         # with torch.amp.autocast("cuda", enabled=False):
-            extrinsic = batch["context"]["extrinsics"]
-            intrinsic = batch["context"]["intrinsics"]
+
             # print("intput int:rinsic:", intrinsic)
             aggregated_tokens_list, image_tokens_list, patch_start_idx = self.aggregator(images = image, 
                                                                     extrinsics = extrinsic, 

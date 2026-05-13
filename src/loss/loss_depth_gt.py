@@ -105,5 +105,7 @@ class LossDepthGT(Loss[LossDepthGTCfg, LossDepthGTCfgWrapper]):
             depth_loss_l1 = torch.abs(target_depth[target_valid_mask] - gs_depth[target_valid_mask]).mean()
             depth_loss_gradient = self.gradient_loss(gs_depth, target_depth, target_valid_mask)
             depth_loss = depth_loss_l1 + depth_loss_gradient
+        else:
+            depth_loss = torch.tensor(0.0, device=gs_depth.device)
 
         return self.cfg.weight * torch.nan_to_num(depth_loss, nan=0.0, posinf=0.0, neginf=0.0)

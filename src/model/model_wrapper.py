@@ -102,6 +102,7 @@ class TrainCfg:
     weight_depth_scale: float = 0.1
     weight_depth_edge_aware_log_l1: float = 0.0
     weight_depth_l1: float = 0.0
+    weight_depth_mse: float = 0.0
     weight_depth_edge_aware_gradient: float = 0.0
     depth_decay_start_step: int = 20000
     depth_decay_initial: float = 0.05
@@ -168,6 +169,7 @@ class ModelWrapper(LightningModule):
                 weight_depth_scale=self.train_cfg.weight_depth_scale,
                 weight_depth_edge_aware_log_l1=self.train_cfg.weight_depth_edge_aware_log_l1,
                 weight_depth_l1=self.train_cfg.weight_depth_l1,
+                weight_depth_mse=self.train_cfg.weight_depth_mse,
                 weight_depth_edge_aware_gradient=self.train_cfg.weight_depth_edge_aware_gradient,
                 distill_warmup_steps=self.train_cfg.distill_warmup_steps,
                 distill_warmup_start=self.train_cfg.distill_warmup_start,
@@ -321,6 +323,7 @@ class ModelWrapper(LightningModule):
                 self.log("loss/distill_depth_norm_head_mse", loss_distill_list['loss_depth_norm_head_mse'])
                 self.log("loss/distill_depth_norm_head_gradient", loss_distill_list['loss_depth_norm_head_gradient'])
                 self.log("loss/distill_depth_l1", loss_distill_list['loss_depth_l1'])
+                self.log("loss/distill_depth_mse", loss_distill_list['loss_depth_mse'])
                 self.log("loss/distill_depth_gradient", loss_distill_list['loss_depth_gradient'])
                 self.log("loss/distill_depth_scale", loss_distill_list['loss_depth_scale'])
                 self.log("loss/distill_depth_edge_aware_log_l1", loss_distill_list['loss_depth_edge_aware_log_l1'])
@@ -331,6 +334,7 @@ class ModelWrapper(LightningModule):
                 loss_breakdown.append(f"distill={loss_distill_list['loss_distill'].detach().float().item():.6f}")
                 loss_breakdown.append(f"distill_depth={loss_distill_list['loss_depth'].detach().float().item():.6f}")
                 loss_breakdown.append(f"distill_depth_l1={loss_distill_list['loss_depth_l1'].detach().float().item():.6f}")
+                loss_breakdown.append(f"distill_depth_mse={loss_distill_list['loss_depth_mse'].detach().float().item():.6f}")
                 loss_breakdown.append(f"distill_depth_gradient={loss_distill_list['loss_depth_gradient'].detach().float().item():.6f}")
                 loss_breakdown.append(f"distill_depth_scale={loss_distill_list['loss_depth_scale'].detach().float().item():.6f}")
                 loss_breakdown.append(f"distill_edge_logl1={loss_distill_list['loss_depth_edge_aware_log_l1'].detach().float().item():.6f}")
