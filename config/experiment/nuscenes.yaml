@@ -32,6 +32,7 @@ model:
     export_pt_path: 'checkpoints/distill_recon_dwsplat/e5s1w2_distill_recon' # only when useOG_OmniVGGT is false, this path is effective
     # aggregator_merged.ckpt depth_head.ckpt
     distill: true
+    self_distill: true # only when distill is true, this flag is effective
     frozenAggregator: true # not used
     frozenGaussianHead: false
     useDGGTGaussianHead: false
@@ -81,7 +82,7 @@ data_loader:
     batch_size: 4 # not used here
     
 trainer:
-  max_steps: 100000
+  max_steps: 80000
   val_check_interval: 1000
   log_every_n_steps: 20
   print_log_every_n_steps: 20
@@ -107,14 +108,14 @@ train:
   distill_warmup_steps: 1000
   distill_warmup_start: 0.4
   distill_warmup_end: 1.0
-  weight_depth: 0.0 # loss_depth_l1 + loss_depth_gradient
+  weight_depth: 1.0 # loss_depth_l1 + loss_depth_gradient
   weight_depth_gradient: 0.0 # gs render depth and distill depth-head metric depth  
   weight_depth_norm_head_mse: 0.0 # depth-head norm depth adn distill depth-head norm depth
   weight_depth_norm_head_gradient: 0.00 # depth-head norm depth adn distill depth-head norm depth
   weight_depth_scale: 0.0 # explicit median-scale anchor to prevent scene scale collapse
   weight_depth_l1: 0.0 # not used, use depth_decay_initial
   weight_depth_mse: 0.00
-  weight_depth_edge_aware_log_l1: 0.00
+  weight_depth_edge_aware_log_l1: 0.005
   weight_depth_edge_aware_gradient: 0.00
   depth_decay_initial: 0.1  
   depth_decay_final: 0.0001
@@ -141,7 +142,7 @@ loss:
     weight: 0.001 #
     loss_type: l1
   opacity:
-    weight: 0.01
+    weight: 0.00
     weight_mask: 1.0
     weight_binary: 1.0
     type: mean

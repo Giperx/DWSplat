@@ -90,6 +90,7 @@ class EncoderAnySplatCfg:
     pretrained_weights: str = ""
     pose_free: bool = True
     pred_pose: bool = True
+    self_distill: bool = False
     frozenAggregator: bool = False
     frozenGaussianHead: bool = False
     useDGGTGaussianHead: bool = False
@@ -315,6 +316,7 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
         self.freeze_backbone = cfg.freeze_backbone
         self.distill = cfg.distill
         self.frozenAggregator = cfg.frozenAggregator
+        self.self_distill = cfg.self_distill
         self.frozenGaussianHead = cfg.frozenGaussianHead
         self.frozenDepthHead = cfg.frozenDepthHead
         self.pred_pose = cfg.pred_pose
@@ -338,13 +340,29 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
         #             param.data = param.data.cpu()
         if self.distill: 
             # Initialize the model and load the pretrained weights.
-            distill_model = OmniVGGT()
-            state_dict = load_file("./checkpoints/checkpoints/OmniVGGT.safetensors")
-            distill_model.load_state_dict(state_dict, strict=True)
-            print("Loaded distill model from OmniVGGT.safetensors")
-            self.distill_aggregator = copy.deepcopy(distill_model.aggregator.to(torch.bfloat16))
-            self.distill_depth_head = copy.deepcopy(distill_model.depth_head)
-            del distill_model
+            if self.self_distill:
+                distill_model = OmniVGGT()
+                state_dict = load_file("./checkpoints/checkpoints/OmniVGGT.safetensors")
+                distill_model.load_state_dict(state_dict, strict=True)
+                print("Loaded distill model from OmniVGGT.safetensors")
+                self.distill_aggregator = copy.deepcopy(distill_model.aggregator.to(torch.bfloat16))
+                self.distill_depth_head = copy.deepcopy(distill_model.depth_head)
+                del distill_model
+            else:
+                distill_model = VGGT()
+                aggregator_ckpt = "checkpoints/recondrive/merged_ckpts/aggregator_merged.ckpt"
+                depth_head_ckpt = "checkpoints/recondrive/merged_ckpts/depth_head.ckpt"
+                agg_state = load_ckpt_state_dict(aggregator_ckpt)
+                dep_state = load_ckpt_state_dict(depth_head_ckpt)
+                missing_agg, unexpected_agg = distill_model.aggregator.load_state_dict(agg_state, strict=False)
+                missing_dep, unexpected_dep = distill_model.depth_head.load_state_dict(dep_state, strict=False)
+                print(f"distill_model VGGT Loaded aggregator ckpt: {aggregator_ckpt}")
+                print(f"aggregator missing={len(missing_agg)}, unexpected={len(unexpected_agg)}")
+                print(f"distill_model VGGT Loaded depth_head ckpt: {depth_head_ckpt}")
+                print(f"depth_head missing={len(missing_dep)}, unexpected={len(unexpected_dep)}")
+                self.distill_aggregator = copy.deepcopy(distill_model.aggregator.to(torch.bfloat16))
+                self.distill_depth_head = copy.deepcopy(distill_model.depth_head)
+                del agg_state, dep_state, distill_model                
             
             for module in [
                 self.distill_aggregator,
@@ -651,31 +669,47 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
             ]:
                 for param in module.parameters():
                     param.data = param.data.to(device, non_blocking=True)
-            
+                    
+            if self.self_distill:
+                with torch.no_grad(): 
+                    with torch.amp.autocast("cuda", enabled=True, dtype=torch.bfloat16):   
+                        distill_aggregated_tokens_list, _, distill_patch_start_idx = self.distill_aggregator(images = distill_image, 
+                                                                                extrinsics = extrinsic, 
+                                                                                intrinsics = intrinsic,
+                                                                                depth = depth_omni,
+                                                                                mask = mask_omni,
+                                                                                depth_gt_index = depth_gt_index,
+                                                                                camera_gt_index = camera_gt_index,
+                                                                                )      
+            else:               
+                with torch.no_grad():    
+                    # Process with bfloat16 precision
+                    with torch.amp.autocast("cuda", enabled=True, dtype=torch.bfloat16):
+                    # with torch.amp.autocast("cuda", enabled=False):
+                        distill_aggregated_tokens_list, distill_patch_start_idx = (
+                            self.distill_aggregator(
+                                distill_image,
+                                intermediate_layer_idx=self.cfg.intermediate_layer_idx,
+                            )
+                        )
+                        
             with torch.no_grad(): 
-                with torch.amp.autocast("cuda", enabled=True, dtype=torch.bfloat16):   
-                    distill_aggregated_tokens_list, _, distill_patch_start_idx = self.distill_aggregator(images = distill_image, 
-                                                                            extrinsics = extrinsic, 
-                                                                            intrinsics = intrinsic,
-                                                                            depth = depth_omni,
-                                                                            mask = mask_omni,
-                                                                            depth_gt_index = depth_gt_index,
-                                                                            camera_gt_index = camera_gt_index,
-                                                                            )      
-            with torch.amp.autocast("cuda", enabled=False):
-                distill_depth_map, distill_depth_conf = self.distill_depth_head(
-                    distill_aggregated_tokens_list,
-                    images=image,
-                    patch_start_idx=distill_patch_start_idx,
-                )
-
-                distill_depth_map_norm = torch.sigmoid(torch.log(torch.clamp(distill_depth_map, min=1e-6)))
+                # Process with default precision
+                with torch.amp.autocast("cuda", enabled=False):
+                    # Get depth information
+                    distill_depth_map, distill_depth_conf = self.distill_depth_head(
+                        distill_aggregated_tokens_list,
+                        images=distill_image,
+                        patch_start_idx=distill_patch_start_idx,
+                    )            
+                # distill_depth_map = torch.nn.functional.sigmoid(torch.log(distill_depth_map))
+                distill_depth_map = torch.sigmoid(torch.log(torch.clamp(distill_depth_map, min=1e-6)))
                 distill_infos["depth_map_norm"] = distill_depth_map.detach()
                 
                 min_depth = self.min_depth
                 max_depth = self.max_depth
                 depth_range = max_depth-min_depth
-                distill_depth_map = min_depth + depth_range * distill_depth_map_norm
+                distill_depth_map = min_depth + depth_range * distill_depth_map
                 distill_infos["depth_map"] = distill_depth_map.detach()
 
                 distill_pts_all = batchify_unproject_depth_map_to_point_map(
