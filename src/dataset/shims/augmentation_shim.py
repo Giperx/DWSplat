@@ -38,23 +38,51 @@ def reflect_extrinsics(extrinsics: Tensor) -> Tensor:
     return extr4_ref[..., :3, :]  # (..., 3, 4)
 
 
+def reflect_intrinsics(intrinsics: Tensor) -> Tensor:
+    """Reflect normalized intrinsics along the x axis.
+
+    For normalized intrinsics (0-1 range), horizontal flip means cx -> (1 - cx).
+    Supports (..., 3, 3) shape.
+    """
+    reflected = intrinsics.clone()
+    # cx is at position [..., 0, 2]
+    reflected[..., 0, 2] = 1.0 - intrinsics[..., 0, 2]
+    return reflected
+
+
 def reflect_views(views: AnyViews) -> AnyViews:
-    if "depth" in views.keys():
-        return {
-            **views,
-            "image": views["image"].flip(-1),
-            "extrinsics": reflect_extrinsics(views["extrinsics"]),
-            "depth": views["depth"].flip(-1),
-            "depth_valid_mask": views["depth_valid_mask"].flip(-1),
-            "car_cam_mask": views["car_cam_mask"].flip(-1),
-            # "fine_dynamic_masks": views["fine_dynamic_masks"].flip(-1),
-        }
-    else:
-        return {
-            **views,
-            "image": views["image"].flip(-1),
-            "extrinsics": reflect_extrinsics(views["extrinsics"]),
-        }
+    result = {
+        **views,
+        "image": views["image"].flip(-1),
+        "car_cam_mask": views["car_cam_mask"].flip(-1),
+        "extrinsics": reflect_extrinsics(views["extrinsics"]),
+    }
+    # Flip intrinsics principal point if present (GT intrinsics may have off-center cx)
+    if "intrinsics" in views:
+        result["intrinsics"] = reflect_intrinsics(views["intrinsics"])
+    if "depth" in views:
+        result["depth"] = views["depth"].flip(-1)
+        result["depth_valid_mask"] = views["depth_valid_mask"].flip(-1)
+    if "dynamic_mask" in views:
+        result["dynamic_mask"] = views["dynamic_mask"].flip(-1)
+    return result
+
+
+def reflect_aux(aux: dict) -> dict:
+    """Reflect auxiliary data (used for projection loss) along the x axis.
+
+    Flips image-like tensors and adjusts intrinsics for principal point offset.
+    Does NOT flip cam_T_cam: relative pose between cameras stays unchanged when both are flipped.
+    """
+    reflected = {
+        **aux,
+        "image": aux["image"].flip(-1),
+        "intrinsics": reflect_intrinsics(aux["intrinsics"]),
+        "car_cam_mask": aux["car_cam_mask"].flip(-1),
+    }
+    if "dynamic_mask" in aux:
+        reflected["dynamic_mask"] = aux["dynamic_mask"].flip(-1)
+    return reflected
 
 
 def apply_augmentation_shim(
@@ -66,12 +94,17 @@ def apply_augmentation_shim(
     if torch.rand(tuple(), generator=generator) < 0.5:
         return example
 
-
-    return {
+    result = {
         **example,
         "context": reflect_views(example["context"]),
         "target": reflect_views(example["target"]),
     }
+
+    # Also augment auxiliary data if present (used for projection loss)
+    if "aux" in example:
+        result["aux"] = reflect_aux(example["aux"])
+
+    return result
 
 
 def rotate_90_degrees(

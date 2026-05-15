@@ -4,10 +4,10 @@ defaults:
   - /dataset@_group_.nuscenes: nuscenes
   - override /model/encoder: anysplat
   - override /model/encoder/backbone: croco
-  - override /loss: [mse, lpips, depth_consis, opacity, projection, depth_gt, depth_edge_smooth]
+  - override /loss: [mse, lpips, depth_consis, projection, depth_edge_smooth]
 
 wandb:
-  project: 2605_distill_lora_omnivggt
+  project: 2605_distill_wlora_recon
   name: omnivggt_finetune
   tags: [nuScenes, 294x518]
   mode: disabled # online offline disabled
@@ -32,7 +32,7 @@ model:
     export_pt_path: 'checkpoints/distill_recon_dwsplat/e5s1w2_distill_recon' # only when useOG_OmniVGGT is false, this path is effective
     # aggregator_merged.ckpt depth_head.ckpt
     distill: true
-    self_distill: true # only when distill is true, this flag is effective
+    self_distill: false # only when distill is true, this flag is effective
     frozenAggregator: true # not used
     frozenGaussianHead: false
     useDGGTGaussianHead: false
@@ -82,7 +82,7 @@ data_loader:
     batch_size: 4 # not used here
     
 trainer:
-  max_steps: 80000
+  max_steps: 70000
   val_check_interval: 1000
   log_every_n_steps: 20
   print_log_every_n_steps: 20
@@ -114,8 +114,8 @@ train:
   weight_depth_norm_head_gradient: 0.00 # depth-head norm depth adn distill depth-head norm depth
   weight_depth_scale: 0.0 # explicit median-scale anchor to prevent scene scale collapse
   weight_depth_l1: 0.0 # not used, use depth_decay_initial
-  weight_depth_mse: 0.00
-  weight_depth_edge_aware_log_l1: 0.005
+  weight_depth_mse: 0.1
+  weight_depth_edge_aware_log_l1: 0.000
   weight_depth_edge_aware_gradient: 0.00
   depth_decay_initial: 0.1  
   depth_decay_final: 0.0001
@@ -139,7 +139,7 @@ loss:
     weight: 0.01 # 
     loss_type: MSE
   depth_gt:
-    weight: 0.001 #
+    weight: 0.000 #
     loss_type: l1
   opacity:
     weight: 0.00
@@ -147,7 +147,8 @@ loss:
     weight_binary: 1.0
     type: mean
   projection:
-    weight: 1.0
+    weight: 0.1
     norm_mode: mean_std
   depth_edge_smooth: # inverse depth; gs pred rgb with depth head output
     weight: 0.1
+

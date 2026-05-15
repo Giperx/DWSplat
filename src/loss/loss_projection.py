@@ -12,7 +12,7 @@ from src.model.types import Gaussians
 from .loss import Loss
 
 _DEBUG_DIR = "tmp_debug_projection_loss"
-_DEBUG_SAVED = True
+_DEBUG_SAVED = False
 
 
 @dataclass
@@ -174,7 +174,7 @@ class LossProjection(Loss[LossProjectionCfg, LossProjectionCfgWrapper]):
                         )
 
                     # --- Debug visualization ---
-                    if not _DEBUG_SAVED:
+                    if not _DEBUG_SAVED and global_step % 1000 == 0:
                         ref_img = ref_images[b:b+1, v_idx]  # GT
 
                         # 3. warped src with src masks applied (car+dynamic -> black)

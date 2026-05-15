@@ -650,8 +650,9 @@ class DatasetNuScenes(Dataset):
             }
 
             # --- Augmentation ---
-            if self.stage == "train" and self.cfg.augment:
-                example = apply_augmentation_shim(example)
+            # augment
+            # if self.stage == "train" and self.cfg.augment:
+            #     example = apply_augmentation_shim(example)
 
             # Placeholder valid masks
             context_valid_mask = torch.ones_like(example["context"]["image"])[:, 0].bool()
