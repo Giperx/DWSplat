@@ -200,7 +200,7 @@ def train(cfg_dict: DictConfig):
         logger=logger,
         devices="auto",
         strategy=(
-                    "ddp" # 或者显式指定 "ddp_find_unused_parameters_false"
+                    "ddp_find_unused_parameters_true"
                     if torch.cuda.device_count() > 1
                     else "auto"
                 ),

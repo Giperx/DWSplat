@@ -1001,7 +1001,7 @@ class ModelWrapper(LightningModule):
             
             print(f'Training parameter: {name}')
             
-            if "gaussian_param_head" in name or "interm" in name:
+            if "gaussian_param_head" in name or "interm" in name or "color_affine_head" in name:
                 new_params.append(param)
                 new_param_names.append(name)
             else:

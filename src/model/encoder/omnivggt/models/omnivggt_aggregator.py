@@ -274,8 +274,8 @@ class ZeroAggregator(Aggregator):
         del frame_intermediates
         del global_intermediates
         del concat_inter_with_tokens
-        del dino_token_list
-        return output_list, output_list_with_tokens, self.patch_start_idx
+        # del dino_token_list
+        return output_list, output_list_with_tokens, dino_token_list, self.patch_start_idx
         # return output_list, output_list_with_tokens, dino_token_list, self.patch_start_idx
         
         # return output_list, self.patch_start_idx

@@ -17,7 +17,7 @@ from src.dataset.shims.normalize_shim import apply_normalize_shim
 from src.dataset.shims.patch_shim import apply_patch_shim
 from src.dataset.types import BatchedExample, DataShim
 from src.geometry.projection import sample_image_grid
-
+from src.model.encoder.heads.color_affine_head import ColorAffineHead
 from src.model.encoder.heads.vggt_dpt_gs_head import VGGT_DPT_GS_Head
 from src.model.encoder.heads.GaussianHead import GaussianHead, DPTHeadDGGT
 from src.model.encoder.vggt.utils.geometry import batchify_unproject_depth_map_to_point_map
@@ -93,6 +93,7 @@ class EncoderAnySplatCfg:
     self_distill: bool = False
     frozenAggregator: bool = False
     frozenGaussianHead: bool = False
+    frozenColorAffineHead: bool = False
     useDGGTGaussianHead: bool = False
     NotUsePretrainedGaussianHead: bool = True
     gshead_pt_path: str = 'ckpts/Weights/gs_head.pt'  
@@ -414,6 +415,7 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
 
         self.pose_free = cfg.pose_free
         self.useDGGTGaussianHead = cfg.useDGGTGaussianHead
+        self.frozenColorAffineHead = cfg.frozenColorAffineHead
         self.NotUsePretrainedGaussianHead = cfg.NotUsePretrainedGaussianHead
         if self.pose_free:
             if self.useDGGTGaussianHead:
@@ -451,10 +453,13 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
         
             del gs_head_state
         
+        self.color_affine_head = ColorAffineHead()
+        
         print(
             # "self.frozenAggregator:", self.frozenAggregator,
               "self.frozenGaussianHead:", self.frozenGaussianHead,
               "self.frozenDepthHead:", self.frozenDepthHead,
+              "self.frozenColorAffineHead:", self.frozenColorAffineHead,
         )
         ### Freeze specific components
         # if self.frozenAggregator:
@@ -466,14 +471,18 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
         if self.frozenDepthHead:
             for param in self.depth_head.parameters():
                 param.requires_grad = False
+        if self.frozenColorAffineHead:
+            for param in self.color_affine_head.parameters():
+                param.requires_grad = False
 
-
+        
     ### add pretrained weights loading pretrain AnySplat model
     def usePreTrainedWeights(self, flag: bool = True):
         print(
             # "self.frozenAggregator:", self.frozenAggregator,
-              "self.frozenGaussianHead:", self.frozenGaussianHead,
-              "self.frozenDepthHead:", self.frozenDepthHead,
+            "self.frozenGaussianHead:", self.frozenGaussianHead,
+            "self.frozenDepthHead:", self.frozenDepthHead,
+            "self.frozenColorAffineHead:", self.frozenColorAffineHead,
         )
         ### add pretrained weights loading pretrain AnySplat model
         
@@ -503,7 +512,10 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
         if self.frozenDepthHead:
             for param in self.depth_head.parameters():
                 param.requires_grad = False
-
+        if self.frozenColorAffineHead:
+            for param in self.color_affine_head.parameters():
+                param.requires_grad = False
+                
     def map_pdf_to_opacity(
         self,
         pdf: Float[Tensor, " *batch"],
@@ -673,7 +685,7 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
             if self.self_distill:
                 with torch.no_grad(): 
                     with torch.amp.autocast("cuda", enabled=True, dtype=torch.bfloat16):   
-                        distill_aggregated_tokens_list, _, distill_patch_start_idx = self.distill_aggregator(images = distill_image, 
+                        distill_aggregated_tokens_list, _, _, distill_patch_start_idx = self.distill_aggregator(images = distill_image, 
                                                                                 extrinsics = extrinsic, 
                                                                                 intrinsics = intrinsic,
                                                                                 depth = depth_omni,
@@ -741,7 +753,7 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
         # with torch.amp.autocast("cuda", enabled=False):
 
             # print("intput int:rinsic:", intrinsic)
-            aggregated_tokens_list, image_tokens_list, patch_start_idx = self.aggregator(images = image, 
+            aggregated_tokens_list, image_tokens_list, dino_token_list, patch_start_idx = self.aggregator(images = image, 
                                                                     extrinsics = extrinsic, 
                                                                     intrinsics = intrinsic,
                                                                     depth = depth_omni,
@@ -817,7 +829,8 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
                 image_size=(H, W),
             )
         
-        del aggregated_tokens_list, patch_start_idx, image_tokens_list
+        affine_w, affine_b = self.color_affine_head(aggregated_tokens_list, dino_token_list)
+        del aggregated_tokens_list, patch_start_idx, image_tokens_list, dino_token_list
         torch.cuda.empty_cache()
 
         pts_flat = pts_all.flatten(2, 3)
@@ -1076,6 +1089,7 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
             depth_dict=dict(depth=depth_map, conf_valid_mask=conf_valid_mask, depth_map_norm=depth_map_norm),
             infos=infos,
             distill_infos=distill_infos,
+            affine_params=dict(affine_w=affine_w, affine_b=affine_b),
         )
 
     def get_data_shim(self) -> DataShim:

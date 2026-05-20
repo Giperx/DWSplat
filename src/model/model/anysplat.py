@@ -121,6 +121,7 @@ class AnySplat(nn.Module, huggingface_hub.PyTorchModelHubMixin):
         device = batch["context"]["image"].device
         encoder_output = self.encoder(batch, global_step, visualization_dump=visualization_dump)
         gaussians, pred_context_pose = encoder_output.gaussians, encoder_output.pred_context_pose
+        affine_w, affine_b = encoder_output.affine_params["affine_w"], encoder_output.affine_params["affine_b"]
         
         if wide_fov and new_width is not None:
             ### add for wide fov rendering
@@ -151,6 +152,13 @@ class AnySplat(nn.Module, huggingface_hub.PyTorchModelHubMixin):
             (h, w),
             "depth",
         )      
-
+        # Apply per-view color affine transform: color_out = W @ color_in + b
+        color = output.color  # (B, S, 3, H, W)
+        # B_s, S_s, _, H_s, W_s = color.shape
+        # color_flat = color.reshape(B_s * S_s, 3, H_s * W_s)          # (B*S, 3, H*W)
+        # W_flat = affine_w.reshape(B_s * S_s, 3, 3)                   # (B*S, 3, 3)
+        # b_flat = affine_b.reshape(B_s * S_s, 3, 1)                   # (B*S, 3, 1)
+        # output.color = (torch.bmm(W_flat, color_flat) + b_flat).reshape(B_s, S_s, 3, H_s, W_s)
+        output.color = torch.einsum("bsij, bsjhw -> bsihw", affine_w, color) + affine_b.unsqueeze(-1).unsqueeze(-1)
         return encoder_output, output
     

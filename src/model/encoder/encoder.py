@@ -18,6 +18,7 @@ class EncoderOutput:
     depth_dict: dict | None
     infos: dict | None
     distill_infos: dict | None
+    affine_params: dict | None
 
 class Encoder(nn.Module, ABC, Generic[T]):
     cfg: T
