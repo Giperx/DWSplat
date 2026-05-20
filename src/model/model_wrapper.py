@@ -711,6 +711,7 @@ class ModelWrapper(LightningModule):
                 new_width=w * 2,
             )
             rgb_pred_wide = output_wide.color.float()
+            og_rgb_pred_wide = output_wide.og_color.float()
 
             for sample_idx in range(b):
                 rgb_gt_need = []
@@ -728,6 +729,7 @@ class ModelWrapper(LightningModule):
                 comparison_wide = hcat(
                     add_label(vcat(*rgb_gt_need), "Target (Ground Truth)"),
                     add_label(vcat(*rgb_pred_wide_need), "Target (Prediction)"),
+                    add_label(vcat(*og_rgb_pred_wide[sample_idx, :3]), "Target (Original Prediction)"),
                 )
 
                 comparison_wide = torch.nn.functional.interpolate(

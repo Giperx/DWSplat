@@ -92,7 +92,7 @@ class DecoderSplattingCUDA(Decoder[DecoderSplattingCUDACfg]):
             rendered_depths.append(torch.cat(rendering_depth_list, dim=0).squeeze())
             rendered_imgs.append(torch.cat(rendering_list, dim=0))
             rendered_alphas.append(torch.cat(rendering_alpha_list, dim=0).squeeze())
-        return DecoderOutput(torch.stack(rendered_imgs), torch.stack(rendered_depths), torch.stack(rendered_alphas), lod_rendering=None)
+        return DecoderOutput(torch.stack(rendered_imgs), torch.stack(rendered_depths), torch.stack(rendered_alphas), lod_rendering=None, og_color=None)
 
     def forward(
         self,

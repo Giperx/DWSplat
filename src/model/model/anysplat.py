@@ -154,6 +154,8 @@ class AnySplat(nn.Module, huggingface_hub.PyTorchModelHubMixin):
         )      
         # Apply per-view color affine transform: color_out = W @ color_in + b
         color = output.color  # (B, S, 3, H, W)
+        if wide_fov:
+            output.og_color = color.clone()  # 保存原始颜色以供可视化对比
         # B_s, S_s, _, H_s, W_s = color.shape
         # color_flat = color.reshape(B_s * S_s, 3, H_s * W_s)          # (B*S, 3, H*W)
         # W_flat = affine_w.reshape(B_s * S_s, 3, 3)                   # (B*S, 3, 3)

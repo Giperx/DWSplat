@@ -7,7 +7,7 @@ defaults:
   - override /loss: [mse, lpips, depth_consis, depth_gt, projection, depth_edge_smooth]
 
 wandb:
-  project: 260520_distill_wlora_self_affine
+  project: 260520_gs_head_affine
   name: omnivggt_finetune
   tags: [nuScenes, 294x518]
   mode: disabled # online offline disabled
@@ -25,18 +25,18 @@ model:
     anchor_feat_dim: 128
     gs_prune: false # ablate: opacity loss
     pred_head_type: depth
-    freeze_backbone: false # means freeze aggregator and depth head
+    freeze_backbone: true # means freeze aggregator and depth head
     use_lora_aggregator: true # only when freeze_backbone is false, this flag is effective
     freeze_patch_embed_in_lora: true # true: LoRA 不作用于 patch_embed 相关层
-    useOG_OmniVGGT: true
+    useOG_OmniVGGT: false 
     export_pt_path: 'checkpoints/distill_recon_dwsplat/e5s1w2_distill_recon' # only when useOG_OmniVGGT is false, this path is effective
     # aggregator_merged.ckpt depth_head.ckpt
-    distill: true
+    distill: false
     self_distill: true # only when distill is true, this flag is effective
     frozenAggregator: true # not used
     frozenGaussianHead: false
     useDGGTGaussianHead: false
-    frozenDepthHead: false
+    frozenDepthHead: true
     frozenColorAffineHead: false
     NotUsePretrainedGaussianHead: true
     gshead_pt_path: 'checkpoints/gshead_pt/distill_recon_dwsplat_woLora_wg_e5s1w2_vol0.024scale0.03+5.0/gaussian_param_head.pt' # only when NotUsePretrainedGaussianHead is false, this path is effective
@@ -58,14 +58,14 @@ dataset:
       num_target_views: 3
       # min_distance_between_context_views: 32
       # max_distance_between_context_views: 256
-      max_img_per_gpu: 9
+      max_img_per_gpu: 15
     avg_pose: false
     intr_augment: false
     normalize_by_pts3d: false
     rescale_to_1cube: false
 
 optimizer:
-  lr: 3e-5 
+  lr: 5e-5 
   # 2e-4 and 24 per gpu, 16 gpus
   # 1gpu, 9imgs, 3e-5    linear scale: 4.6e-6
   # 4gpu, 9imgs, 6e-5    linear scale: 1.8e-5
@@ -83,7 +83,7 @@ data_loader:
     batch_size: 4 # not used here
     
 trainer:
-  max_steps: 70000
+  max_steps: 35000
   val_check_interval: 1000
   log_every_n_steps: 20
   print_log_every_n_steps: 20
@@ -96,7 +96,7 @@ checkpointing:
   # load: outputs/exp_OmniVGGT_nuScenes_omnivggt_finetune/2026-04-23_23-51-21/checkpoints/epoch_3-step_25000.ckpt
   log_save_dir: outputs/${wandb.project}/${wandb.name}/${oc.env:DWSplat_SYNCED_TS,${now:%Y-%m-%d_%H-%M-%S}}
   flag_gaussian_head: true # 是否读取Gaussian Head的权重
-  every_n_train_steps: 10000
+  every_n_train_steps: 5000
   save_weights_only: false
   save_top_k: 100
   
@@ -140,7 +140,7 @@ loss:
     weight: 0.01 # 
     loss_type: MSE
   depth_gt:
-    weight: 0.005 #
+    weight: 0.000 #
     loss_type: l1
   opacity:
     weight: 0.00
@@ -148,8 +148,8 @@ loss:
     weight_binary: 1.0
     type: mean
   projection:
-    weight: 0.1
+    weight: 0.0
     norm_mode: mean_std
   depth_edge_smooth: # inverse depth; gs pred rgb with depth head output
-    weight: 0.1
+    weight: 0.0
 

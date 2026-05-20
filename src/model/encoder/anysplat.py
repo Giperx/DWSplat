@@ -998,6 +998,8 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
 
         infos = {}
         infos["scene_scale"] = scene_scale
+        if distill_infos.get("scene_scale") is None:
+            distill_infos["scene_scale"] = scene_scale
         # total_pixel_num = B * H * W * V
         first_batch_pixel_num = H * W * V
         # total_gs_num = voxelized_gs_num + supplement_gs_num
