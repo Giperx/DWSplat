@@ -114,8 +114,9 @@ class SpatialColorAffineHead(nn.Module):
         self.scale_range = 0.5
         self.shift_range = 0.2
 
-    def forward(self, patch_tokens, target_H, target_W):
+    def forward(self, aggregated_tokens_list: List[torch.Tensor], dino_token_list: List[torch.Tensor], target_H=294, target_W=518):
         # patch_tokens shape: [B, S, 1369, 1024]
+        patch_tokens = dino_token_list[-1][:, :, 5:, :]  # 取最后一层的 patch tokens
         B, S, N, C = patch_tokens.shape
         
         # 1. 恢复空间网格维度 (假设 1369 = 37 x 37)
@@ -176,9 +177,11 @@ class ConditionedSpatialAffineHead(nn.Module):
         self.scale_range = 0.5
         self.shift_range = 0.2
 
-    def forward(self, patch_tokens, camera_token, target_H, target_W):
+    def forward(self, aggregated_tokens_list: List[torch.Tensor], dino_token_list: List[torch.Tensor], target_H=294, target_W=518):
         # patch_tokens shape: [B, S, 1369, 1024]
         # camera_token shape: [B, S, 2048]
+        patch_tokens = dino_token_list[-1][:, :, 5:, :]  # 取最后一层的 patch tokens
+        camera_token = aggregated_tokens_list[-1][:, :, 0, :]  # 取最后一层的 camera token
         B, S, N, C_patch = patch_tokens.shape
         _, _, C_cam = camera_token.shape
         
