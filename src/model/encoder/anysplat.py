@@ -17,7 +17,7 @@ from src.dataset.shims.normalize_shim import apply_normalize_shim
 from src.dataset.shims.patch_shim import apply_patch_shim
 from src.dataset.types import BatchedExample, DataShim
 from src.geometry.projection import sample_image_grid
-from src.model.encoder.heads.color_affine_head import ColorAffineHead
+from src.model.encoder.heads.color_affine_head import ColorAffineHead, SpatialColorAffineHead, ConditionedSpatialAffineHead
 from src.model.encoder.heads.vggt_dpt_gs_head import VGGT_DPT_GS_Head
 from src.model.encoder.heads.GaussianHead import GaussianHead, DPTHeadDGGT
 from src.model.encoder.vggt.utils.geometry import batchify_unproject_depth_map_to_point_map
