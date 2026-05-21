@@ -164,11 +164,14 @@ class AnySplat(nn.Module, huggingface_hub.PyTorchModelHubMixin):
         if affine_w.shape[-1] != color.shape[-1]:
             output.color = torch.einsum("bsij, bsjhw -> bsihw", affine_w, color) + affine_b.unsqueeze(-1).unsqueeze(-1)
         else:
-            # C_render 来自 3DGS 渲染器，Shape: [B * S, 3, H, W]
+            # C_render 来自 3DGS 渲染器，Shape: [B, S, 3, H, W]
             # W_grid 尺寸: [B * S, 3, 3, H, W]
             # b_grid 尺寸: [B * S, 3, H, W]
             # 物理方程: C_pred = W @ C_render + b
-            output.color = torch.einsum('b c i h w, b i h w -> b c h w', affine_w, color) + affine_b
+            B_s, S_s, _, H_s, W_s = color.shape
+            color_flat = color.reshape(B_s * S_s, 3, H_s, W_s)
+            output.color = torch.einsum('n c i h w, n i h w -> n c h w', affine_w, color_flat) + affine_b
+            output.color = output.color.reshape(B_s, S_s, 3, H_s, W_s)
         output.color = output.color.clamp(0.0, 1.0)
         return encoder_output, output
     
