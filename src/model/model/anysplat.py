@@ -156,14 +156,19 @@ class AnySplat(nn.Module, huggingface_hub.PyTorchModelHubMixin):
         color = output.color  # (B, S, 3, H, W)
         if wide_fov:
             output.og_color = color.clone()  # 保存原始颜色以供可视化对比
-        # B_s, S_s, _, H_s, W_s = color.shape
-        # color_flat = color.reshape(B_s * S_s, 3, H_s * W_s)          # (B*S, 3, H*W)
-        # W_flat = affine_w.reshape(B_s * S_s, 3, 3)                   # (B*S, 3, 3)
-        # b_flat = affine_b.reshape(B_s * S_s, 3, 1)                   # (B*S, 3, 1)
-        # output.color = (torch.bmm(W_flat, color_flat) + b_flat).reshape(B_s, S_s, 3, H_s, W_s)
-        if affine_w.shape[-1] != color.shape[-1]:
+
+        if affine_w.dim() == 4:
+            # B_s, S_s, _, H_s, W_s = color.shape
+            # color_flat = color.reshape(B_s * S_s, 3, H_s * W_s)          # (B*S, 3, H*W)
+            # W_flat = affine_w.reshape(B_s * S_s, 3, 3)                   # (B*S, 3, 3)
+            # b_flat = affine_b.reshape(B_s * S_s, 3, 1)                   # (B*S, 3, 1)
+            # output.color = (torch.bmm(W_flat, color_flat) + b_flat).reshape(B_s, S_s, 3, H_s, W_s)
             output.color = torch.einsum("bsij, bsjhw -> bsihw", affine_w, color) + affine_b.unsqueeze(-1).unsqueeze(-1)
         else:
+            if wide_fov:
+                output.color = output.color.clamp(0.0, 1.0)
+                return encoder_output, output
+
             # C_render 来自 3DGS 渲染器，Shape: [B, S, 3, H, W]
             # W_grid 尺寸: [B * S, 3, 3, H, W]
             # b_grid 尺寸: [B * S, 3, H, W]
@@ -172,6 +177,7 @@ class AnySplat(nn.Module, huggingface_hub.PyTorchModelHubMixin):
             color_flat = color.reshape(B_s * S_s, 3, H_s, W_s)
             output.color = torch.einsum('n c i h w, n i h w -> n c h w', affine_w, color_flat) + affine_b
             output.color = output.color.reshape(B_s, S_s, 3, H_s, W_s)
+            
         output.color = output.color.clamp(0.0, 1.0)
         return encoder_output, output
     
