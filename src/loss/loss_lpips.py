@@ -87,4 +87,8 @@ class LossLpips(Loss[LossLpipsCfg, LossLpipsCfgWrapper]):
                 rearrange(image, "b v c h w -> (b v) c h w"),
                 normalize=True,
             )
-        return self.cfg.weight * torch.nan_to_num(loss.mean(), nan=0.0, posinf=0.0, neginf=0.0)
+            
+        if global_step < 1000:
+            return min(global_step / 1000, 1.0) * self.cfg.weight * torch.nan_to_num(loss.mean(), nan=0.0, posinf=0.0, neginf=0.0)
+        else:
+            return self.cfg.weight * torch.nan_to_num(loss.mean(), nan=0.0, posinf=0.0, neginf=0.0)

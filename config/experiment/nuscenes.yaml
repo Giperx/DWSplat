@@ -7,7 +7,7 @@ defaults:
   - override /loss: [mse, lpips, depth_consis, depth_gt, projection, depth_edge_smooth]
 
 wandb:
-  project: 260520_gs_head_affine
+  project: 260521_gs_head_affine
   name: omnivggt_finetune
   tags: [nuScenes, 294x518]
   mode: disabled # online offline disabled
@@ -132,9 +132,9 @@ loss:
   mse:
     weight: 1.0
     conf: false
-    loss_type: mse
+    loss_type: l1
   lpips:
-    weight: 0.1
+    weight: 0.05
     conf: false
   depth_consis:
     weight: 0.01 # 
