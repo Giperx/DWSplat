@@ -119,8 +119,8 @@ class SpatialColorAffineHead(nn.Module):
         patch_tokens = dino_token_list[-1][:, :, 5:, :]  # 取最后一层的 patch tokens
         B, S, N, C = patch_tokens.shape
         
-        # 1. 恢复空间网格维度 (假设 1369 = 37 x 37)
-        H_patch, W_patch = 37, 37
+        # 1. 恢复空间网格维度
+        H_patch, W_patch = target_H // 14, target_W // 14
         x = patch_tokens.transpose(-1, -2).view(B * S, C, H_patch, W_patch) 
         # x shape: [B*S, 1024, 37, 37]
         
@@ -197,8 +197,8 @@ class ConditionedSpatialAffineHead(nn.Module):
         # ==========================================
         # 后续逻辑与之前完全一致
         # ==========================================
-        # 恢复空间网格维度 (37 x 37)
-        H_patch, W_patch = 37, 37
+        # 恢复空间网格维度
+        H_patch, W_patch = target_H // 14, target_W // 14
         x = conditioned_tokens.transpose(-1, -2).view(B * S, C_patch + C_cam, H_patch, W_patch) 
         # x shape: [B*S, 3072, 37, 37]
         
