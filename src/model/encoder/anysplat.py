@@ -453,7 +453,7 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
         
             del gs_head_state
         
-        self.color_affine_head = ColorAffineHead()
+        self.color_affine_head = SpatialColorAffineHead() # ColorAffineHead SpatialColorAffineHead
         
         print(
             # "self.frozenAggregator:", self.frozenAggregator,

@@ -158,6 +158,7 @@ class AnySplat(nn.Module, huggingface_hub.PyTorchModelHubMixin):
             output.og_color = color.clone()  # 保存原始颜色以供可视化对比
 
         if affine_w.dim() == 4:
+            # debug
             # B_s, S_s, _, H_s, W_s = color.shape
             # color_flat = color.reshape(B_s * S_s, 3, H_s * W_s)          # (B*S, 3, H*W)
             # W_flat = affine_w.reshape(B_s * S_s, 3, 3)                   # (B*S, 3, 3)
@@ -166,9 +167,12 @@ class AnySplat(nn.Module, huggingface_hub.PyTorchModelHubMixin):
             output.color = torch.einsum("bsij, bsjhw -> bsihw", affine_w, color) + affine_b.unsqueeze(-1).unsqueeze(-1)
         else:
             if wide_fov:
+                # debug
+                # print("Applying global affine transform (wide FOV)")
                 output.color = output.color.clamp(0.0, 1.0)
                 return encoder_output, output
-
+            # debug
+            # print("Applying spatially varying affine transform")
             # C_render 来自 3DGS 渲染器，Shape: [B, S, 3, H, W]
             # W_grid 尺寸: [B * S, 3, 3, H, W]
             # b_grid 尺寸: [B * S, 3, H, W]

@@ -174,7 +174,7 @@ class ZeroAggregator(Aggregator):
                         intrinsics=intrinsics_selected,
                         image_size_hw=(H, W),
                         pose_encoding_type="absT_quaR_FoV",
-            )
+            ).to(self.pose_embeddings[0].weight.dtype)
             gt_camera_token = self.pose_embeddings[0](pose_encoding).view(B * camera_gt_length, C).unsqueeze(1)
             
             device = images.device
