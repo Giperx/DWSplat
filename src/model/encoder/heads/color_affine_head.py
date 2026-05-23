@@ -111,9 +111,12 @@ class SpatialColorAffineHead(nn.Module):
         nn.init.zeros_(self.conv_mlp[-1].weight)
         nn.init.zeros_(self.conv_mlp[-1].bias)
         
-        self.scale_range = 0.5
-        self.shift_range = 0.2
-
+        # self.scale_range = 0.5
+        # self.shift_range = 0.2
+        
+        self.scale_range = 1.0  # 允许 0.0 到 2.0 倍的缩放
+        self.shift_range = 0.5  # 允许更极端的偏置
+        
     def forward(self, aggregated_tokens_list: List[torch.Tensor], dino_token_list: List[torch.Tensor], target_H=294, target_W=518):
         # patch_tokens shape: [B, S, 1369, 1024]
         patch_tokens = dino_token_list[-1][:, :, 5:, :]  # 取最后一层的 patch tokens
@@ -174,8 +177,11 @@ class ConditionedSpatialAffineHead(nn.Module):
         nn.init.zeros_(self.conv_mlp[-1].weight)
         nn.init.zeros_(self.conv_mlp[-1].bias)
         
-        self.scale_range = 0.5
-        self.shift_range = 0.2
+        # self.scale_range = 0.5
+        # self.shift_range = 0.2
+        
+        self.scale_range = 1.0  # 允许 0.0 到 2.0 倍的缩放
+        self.shift_range = 0.5  # 允许更极端的偏置
 
     def forward(self, aggregated_tokens_list: List[torch.Tensor], dino_token_list: List[torch.Tensor], target_H=294, target_W=518):
         # patch_tokens shape: [B, S, 1369, 1024]
