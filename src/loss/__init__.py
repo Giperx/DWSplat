@@ -11,6 +11,7 @@ from .loss_chamfer_distance import LossChamferDistance, LossChamferDistanceCfgWr
 from .loss_dynamic_mask import LossDynamicMask, LossDynamicMaskCfgWrapper
 from .loss_projection import LossProjection, LossProjectionCfgWrapper
 from .loss_depth_edge_smooth import LossDepthEdgeSmooth, LossDepthEdgeSmoothCfgWrapper
+from .loss_ssim import LossSsim, LossSsimCfgWrapper
 LOSSES = {
     LossDepthCfgWrapper: LossDepth,
     LossLpipsCfgWrapper: LossLpips,
@@ -24,9 +25,10 @@ LOSSES = {
     LossDynamicMaskCfgWrapper: LossDynamicMask,
     LossProjectionCfgWrapper: LossProjection,
     LossDepthEdgeSmoothCfgWrapper: LossDepthEdgeSmooth,
+    LossSsimCfgWrapper: LossSsim,
 }
 
-LossCfgWrapper = LossDepthCfgWrapper | LossLpipsCfgWrapper | LossMseCfgWrapper | LossOpacityCfgWrapper | LossDepthGTCfgWrapper | LossLODCfgWrapper | LossDepthConsisCfgWrapper | LossNormalConsisCfgWrapper | LossChamferDistanceCfgWrapper | LossDynamicMaskCfgWrapper | LossProjectionCfgWrapper | LossDepthEdgeSmoothCfgWrapper
+LossCfgWrapper = LossDepthCfgWrapper | LossLpipsCfgWrapper | LossMseCfgWrapper | LossOpacityCfgWrapper | LossDepthGTCfgWrapper | LossLODCfgWrapper | LossDepthConsisCfgWrapper | LossNormalConsisCfgWrapper | LossChamferDistanceCfgWrapper | LossDynamicMaskCfgWrapper | LossProjectionCfgWrapper | LossDepthEdgeSmoothCfgWrapper | LossSsimCfgWrapper
 
 def get_losses(cfgs: list[LossCfgWrapper]) -> list[Loss]:
     return [LOSSES[type(cfg)](cfg) for cfg in cfgs]

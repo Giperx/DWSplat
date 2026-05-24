@@ -2,11 +2,18 @@
 # All rights reserved.
 # Modified by Botao Ye from https://github.com/VainF/pytorch-msssim/blob/master/pytorch_msssim/ssim.py.
 import warnings
+from dataclasses import dataclass
 from typing import List, Optional, Tuple, Union
 
 import torch
 import torch.nn.functional as F
+from jaxtyping import Float
 from torch import Tensor
+
+from src.dataset.types import BatchedExample
+from src.model.decoder.decoder import DecoderOutput
+from src.model.types import Gaussians
+from .loss import Loss
 
 
 def _fspecial_gauss_1d(size: int, sigma: float) -> Tensor:
@@ -355,3 +362,70 @@ class MS_SSIM(torch.nn.Module):
             weights=self.weights,
             K=self.K,
         )
+
+
+@dataclass
+class LossSsimCfg:
+    weight: float
+    mask: bool = False
+    alpha: bool = False
+    win_size: int = 11
+    win_sigma: float = 1.5
+
+
+@dataclass
+class LossSsimCfgWrapper:
+    ssim: LossSsimCfg
+
+
+class LossSsim(Loss[LossSsimCfg, LossSsimCfgWrapper]):
+    def __init__(self, cfg: LossSsimCfgWrapper) -> None:
+        super().__init__(cfg)
+        self.win_size = self.cfg.win_size
+        self.win_sigma = self.cfg.win_sigma
+
+    def forward(
+        self,
+        prediction: DecoderOutput,
+        batch: BatchedExample,
+        gaussians: Gaussians,
+        depth_dict: dict | None,
+        global_step: int,
+        static_flag: bool = False,
+    ) -> Float[Tensor, ""]:
+        # prediction.color: (b, v, c, h, w), range [0, 1]
+        # batch["context"]["image"]: (b, v, c, h, w), range [-1, 1]
+        pred = prediction.color
+        gt = (batch["context"]["image"][:, batch["using_index"]] + 1) / 2
+
+        b, v, c, h, w = pred.shape
+
+        # Determine mask
+        if self.cfg.mask:
+            mask = batch['context']['valid_mask']
+        elif self.cfg.alpha:
+            mask = prediction.alpha
+        else:
+            mask = None
+
+        if mask is not None:
+            if mask.dim() == 4:
+                mask = mask.unsqueeze(2).expand(-1, -1, c, -1, -1)
+            pred = pred * mask
+            gt = gt * mask
+
+        # Rearrange to (b*v, c, h, w) for ssim function
+        pred_flat = pred.reshape(b * v, c, h, w).float()
+        gt_flat = gt.reshape(b * v, c, h, w).float()
+
+        ssim_val, _, _, _ = ssim(
+            pred_flat,
+            gt_flat,
+            data_range=1.0,
+            size_average=True,
+            win_size=self.win_size,
+            win_sigma=self.win_sigma,
+        )
+
+        loss = 1.0 - ssim_val
+        return self.cfg.weight * torch.nan_to_num(loss, nan=0.0, posinf=0.0, neginf=0.0)

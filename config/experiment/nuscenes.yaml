@@ -4,10 +4,10 @@ defaults:
   - /dataset@_group_.nuscenes: nuscenes
   - override /model/encoder: anysplat
   - override /model/encoder/backbone: croco
-  - override /loss: [mse, lpips, depth_consis, depth_gt, projection, depth_edge_smooth]
+  - override /loss: [mse, lpips, depth_consis, depth_gt, projection, depth_edge_smooth, ssim]
 
 wandb:
-  project: 260522_gs_head_spacialaffine
+  project: 260523_gs_head_conditionedspacialaffine
   name: omnivggt_finetune
   tags: [nuScenes, 294x518]
   mode: disabled # online offline disabled
@@ -130,7 +130,7 @@ hydra:
 
 loss:
   mse:
-    weight: 1.0
+    weight: 0.8
     conf: false
     loss_type: l1
   lpips:
@@ -152,4 +152,5 @@ loss:
     norm_mode: mean_std
   depth_edge_smooth: # inverse depth; gs pred rgb with depth head output
     weight: 0.0
-
+  ssim:
+    weight: 0.2

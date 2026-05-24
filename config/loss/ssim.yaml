@@ -1,0 +1,4 @@
+ssim:
+  weight: 0.2
+  win_size: 11
+  win_sigma: 1.5
