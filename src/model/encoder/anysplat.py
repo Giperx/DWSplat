@@ -589,20 +589,30 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
             padded.append(t)
         return torch.stack(padded)
 
-    def voxelizaton_with_fusion(self, img_feat, pts3d, voxel_size, conf=None):
+    def voxelizaton_with_fusion(self, img_feat, pts3d, voxel_size, conf=None, keep_mask=None):
         # img_feat: B*V, C, H, W
         # pts3d: B*V, 3, H, W
         V, C, H, W = img_feat.shape
         pts3d_flatten = pts3d.permute(0, 2, 3, 1).flatten(0, 2)
 
+        # keep_mask=1 means keep this pixel for GS fusion.
+        conf_flat = conf.flatten()  # [B*V*N]
+        anchor_feats_flat = img_feat.permute(0, 2, 3, 1).flatten(0, 2)  # [B*V*N, ...]
+        if keep_mask is not None:
+            keep_flat = keep_mask.flatten().bool()
+            pts3d_flatten = pts3d_flatten[keep_flat]
+            conf_flat = conf_flat[keep_flat]
+            anchor_feats_flat = anchor_feats_flat[keep_flat]
+
+        if pts3d_flatten.shape[0] == 0:
+            empty_pts = pts3d_flatten.new_zeros((0, 3))
+            empty_feats = anchor_feats_flat.new_zeros((0, C))
+            return empty_pts, empty_feats
+
         voxel_indices = (pts3d_flatten / voxel_size).round().int()  # [B*V*N, 3]
         unique_voxels, inverse_indices, counts = torch.unique(
             voxel_indices, dim=0, return_inverse=True, return_counts=True
         )
-
-        # Flatten confidence scores and features
-        conf_flat = conf.flatten()  # [B*V*N]
-        anchor_feats_flat = img_feat.permute(0, 2, 3, 1).flatten(0, 2)  # [B*V*N, ...]
 
         # Compute softmax weights per voxel
         conf_voxel_max, _ = scatter_max(conf_flat, inverse_indices, dim=0)
@@ -815,6 +825,27 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
                 # distill_infos["pts_all"] = pts_all
                 distill_infos["depth_map"] = depth_map
                 
+            car_cam_mask = batch["context"].get("car_cam_mask", None)
+            if car_cam_mask is None:
+                history_keep_mask = torch.ones((B, V, H, W), dtype=torch.bool, device=device)
+            else:
+                car_cam_mask = car_cam_mask.to(device=device, dtype=torch.float32)
+                if car_cam_mask.dim() == 5 and car_cam_mask.shape[2] == 1:
+                    car_cam_mask = car_cam_mask[:, :, 0]
+                elif car_cam_mask.dim() == 5 and car_cam_mask.shape[-1] == 1:
+                    car_cam_mask = car_cam_mask[..., 0]
+
+                if car_cam_mask.dim() != 4:
+                    history_keep_mask = torch.ones((B, V, H, W), dtype=torch.bool, device=device)
+                else:
+                    if car_cam_mask.shape[-2:] != (H, W):
+                        car_cam_mask = F.interpolate(
+                            car_cam_mask.flatten(0, 1).unsqueeze(1),
+                            size=(H, W),
+                            mode="nearest",
+                        ).squeeze(1).view(B, V, H, W)
+                    history_keep_mask = car_cam_mask > 0.5    
+            # history_keep_mask[:, 0] = True         
 
         # dpt style gs_head input format
         if self.useDGGTGaussianHead:
@@ -851,6 +882,7 @@ class EncoderAnySplat(Encoder[EncoderAnySplatCfg]):
                     pts_all[b_i].permute(0, 3, 1, 2).contiguous(),
                     self.voxel_size,
                     conf=conf[b_i],
+                    keep_mask=history_keep_mask[b_i],
                 )
                 # voxelized_gs_num += int(neural_pts.shape[0])
                 if b_i == 0:
