@@ -708,7 +708,7 @@ class ModelWrapper(LightningModule):
                 self.global_step,
                 visualization_dump=visualization_dump,
                 wide_fov=True,
-                new_width=w * 2,
+                new_width=w * 3,
             )
             rgb_pred_wide = output_wide.color.float()
 
