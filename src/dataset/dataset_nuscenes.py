@@ -457,9 +457,9 @@ class DatasetNuScenes(Dataset):
             # Deterministic for val (e.g., even index front, odd back, or just always front)
             use_front_group = (sample_info['start_idx'] % 2 == 0)
 
-        cam_ids = self.CAM_GROUP_FRONT if use_front_group else self.CAM_GROUP_BACK
+        # cam_ids = self.CAM_GROUP_FRONT if use_front_group else self.CAM_GROUP_BACK
         
-        # cam_ids = self.CAM_GROUP_BACK # 强制使用后视摄像头组进行训练和验证
+        cam_ids = self.CAM_GROUP_BACK # 强制使用后视摄像头组进行训练和验证
         
         # We need to collect data for:
         # 3 cameras * numTimes frames
