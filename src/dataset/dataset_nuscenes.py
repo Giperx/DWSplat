@@ -248,7 +248,7 @@ class DatasetNuScenes(Dataset):
             if self.stage == "train":
                 start_indices = range(0, max_start_idx + 1)
             else:
-                start_indices = [0, 1]
+                start_indices = [0, 10]
             
             for i in start_indices:
                 # We store indices into the 'timesteps' list, not the timestep value itself
@@ -451,12 +451,12 @@ class DatasetNuScenes(Dataset):
         # 1. Decide Camera Group (Front vs Back)
         # Randomly select for training, or maybe deterministic based on index for validation?
         # To keep it simple and allow augmentation, we use random for now, or could store in sample_info
-        if self.stage == "train":
-            use_front_group = random.choice([True, False])
-        else:
-            # Deterministic for val (e.g., even index front, odd back, or just always front)
-            use_front_group = (sample_info['start_idx'] % 2 == 0)
-
+        # if self.stage == "train":
+        #     use_front_group = random.choice([True, False])
+        # else:
+        #     # Deterministic for val (e.g., even index front, odd back, or just always front)
+        #     use_front_group = (sample_info['start_idx'] % 2 == 0)
+        use_front_group = False # 强制使用后视摄像头组进行训练和验证
         # cam_ids = self.CAM_GROUP_FRONT if use_front_group else self.CAM_GROUP_BACK
         
         cam_ids = self.CAM_GROUP_BACK # 强制使用后视摄像头组进行训练和验证
