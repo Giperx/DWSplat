@@ -1,0 +1,139 @@
+# @package _global_
+
+defaults:
+  - /dataset@_group_.lyft1224: lyft1224
+  - override /model/encoder: anysplat
+  - override /model/encoder/backbone: croco
+  - override /loss: [mse, lpips, depth_consis, projection, depth_gt, depth_edge_smooth]
+
+wandb:
+  project: lyft1224_finetune
+  name: lyft1224_omnivggt_finetune
+  tags: [lyft1224, 434x518]
+  mode: disabled
+  tensorboard: true
+
+model:
+  encoder:
+    gs_params_head_type: dpt_gs
+    pose_free: true
+    intrinsics_embed_loc: encoder
+    intrinsics_embed_type: token
+    pretrained_weights: ''
+    voxel_size: 0.025
+    pred_pose: true
+    anchor_feat_dim: 128
+    gs_prune: false
+    pred_head_type: depth
+    freeze_backbone: false
+    use_lora_aggregator: true
+    freeze_patch_embed_in_lora: true
+    useOG_OmniVGGT: true
+    export_pt_path: 'checkpoints/distill_recon_dwsplat/e5s1w2_distill_recon'
+    distill: true
+    self_distill: true
+    frozenAggregator: true
+    frozenGaussianHead: false
+    useDGGTGaussianHead: false
+    frozenDepthHead: false
+    NotUsePretrainedGaussianHead: true
+    gshead_pt_path: 'checkpoints/gshead_pt/distill_recon_dwsplat_woLora_wg_e5s1w2_vol0.024scale0.03+5.0/gaussian_param_head.pt'
+    min_depth: 1.5
+    max_depth: 110.0
+    render_conf: false
+    conf_threshold: 0.1
+    freeze_module: patch_embed
+    voxelize: true
+    intermediate_layer_idx: [4, 11, 17, 23]
+    enable_high_conf_supplement: false
+    high_conf_supplement_quantile: 0.8
+
+dataset:
+  lyft1224:
+    input_image_shape: [434, 518]
+    view_sampler:
+      num_context_views: 3
+      num_target_views: 3
+      max_img_per_gpu: 9
+    avg_pose: false
+    intr_augment: false
+    normalize_by_pts3d: false
+    rescale_to_1cube: false
+
+optimizer:
+  lr: 3e-5
+  warm_up_steps: 2000
+  backbone_lr_multiplier: 0.1
+
+data_loader:
+  train:
+    batch_size: 4
+
+trainer:
+  max_steps: 60000
+  val_check_interval: 1000
+  log_every_n_steps: 20
+  print_log_every_n_steps: 20
+  num_nodes: 1
+  accumulate_grad_batches: 1
+  precision: "bf16-mixed"
+
+checkpointing:
+  load: null
+  log_save_dir: outputs/${wandb.project}/${wandb.name}/${oc.env:DWSplat_SYNCED_TS,${now:%Y-%m-%d_%H-%M-%S}}
+  flag_gaussian_head: true
+  every_n_train_steps: 10000
+  save_weights_only: false
+  save_top_k: 100
+
+train:
+  pose_loss_alpha: 0.0
+  pose_loss_delta: 0.0
+  cxt_depth_weight: 0.0
+  weight_normal: 0.0
+  weight_pose: 0.0
+  distill_warmup_steps: 1000
+  distill_warmup_start: 0.4
+  distill_warmup_end: 1.0
+  weight_depth: 0.0
+  weight_depth_gradient: 0.0
+  weight_depth_norm_head_mse: 0.0
+  weight_depth_norm_head_gradient: 0.00
+  weight_depth_scale: 0.0
+  weight_depth_l1: 0.0
+  weight_depth_mse: 0.0
+  weight_depth_edge_aware_log_l1: 0.000
+  weight_depth_edge_aware_gradient: 0.00
+  depth_decay_initial: 0.1
+  depth_decay_final: 0.0001
+  depth_decay_start_step: 10000000
+  depth_decay_end_step: 10000001
+
+hydra:
+  run:
+    dir: outputs/${wandb.project}/${wandb.name}/${oc.env:DWSplat_SYNCED_TS,${now:%Y-%m-%d_%H-%M-%S}}
+
+loss:
+  mse:
+    weight: 1.0
+    conf: false
+    loss_type: l1
+  lpips:
+    weight: 0.1
+    conf: false
+  depth_consis:
+    weight: 0.01
+    loss_type: MSE
+  depth_gt:
+    weight: 0.05
+    loss_type: l1
+  opacity:
+    weight: 0.00
+    weight_mask: 1.0
+    weight_binary: 1.0
+    type: mean
+  projection:
+    weight: 0.0
+    norm_mode: mean_std
+  depth_edge_smooth:
+    weight: 0.1

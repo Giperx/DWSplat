@@ -1,0 +1,22 @@
+defaults:
+  - base_dataset
+  - view_sampler: all
+
+name: lyft1920
+roots_train: datasets/lyft/lyft_train1920_3cams
+roots_val: datasets/lyft/lyft_val1920_3cams
+split_file_path: null  # auto: train1920.txt for train, lyft_val1920.txt for val
+numTimes: 3
+
+input_image_shape: [294, 518]
+original_image_shape: [1080, 1920]
+cameras_are_circular: false
+
+baseline_min: 1e-3
+baseline_max: 1e2
+max_fov: 180.0
+avg_pose: false
+
+rescale_to_1cube: false
+make_baseline_1: false
+intr_augment: false

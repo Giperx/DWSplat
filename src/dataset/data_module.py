@@ -6,7 +6,7 @@ import numpy as np
 import torch
 from lightning.pytorch import LightningDataModule
 from torch import Generator, nn
-from torch.utils.data import DataLoader, Dataset, IterableDataset
+from torch.utils.data import DataLoader, Dataset, DistributedSampler, IterableDataset
 
 from src.dataset import *
 from src.global_cfg import get_cfg
@@ -37,10 +37,12 @@ def get_data_shim(encoder: nn.Module) -> DataShim:
     return combined_shim
 
 # the training ratio of datasets (example)
-prob_mapping = {DatasetScannetpp: 0.5, 
+prob_mapping = {DatasetScannetpp: 0.5,
                 DatasetDL3DV: 0.5,
                 DatasetCo3d: 0.5,
-                DatasetNuScenes: 1.0}
+                DatasetNuScenes: 1.0,
+                DatasetLyft1224: 0.8,
+                DatasetLyft1920: 0.2}
 
 @dataclass
 class DataLoaderStageCfg:
@@ -150,37 +152,49 @@ class DataModule(LightningDataModule):
         dataset, datasets_ls = get_dataset(self.dataset_cfgs, "val", self.step_tracker, self.dataset_shim)
         world_size = get_world_size()
         rank = get_rank()
-        # here, we random select one dataset for val
-        dataset_key = next(iter(get_cfg()["dataset"]))
-        dataset_cfg = get_cfg()["dataset"][dataset_key]
+        print("val_dataloader function Datasets in validation:", [type(ds).__name__ for ds in datasets_ls])
+
         if len(datasets_ls) > 1:
-             prob = [0.5] * len(datasets_ls)
+            # Multi-dataset val: one dataloader per dataset, all samples guaranteed
+            val_loaders = []
+            for ds in datasets_ls:
+                wrapped_ds = TestDatasetWarpper(ds)
+                sampler = DistributedSampler(wrapped_ds, num_replicas=world_size, rank=rank, shuffle=False)
+                loader = DataLoader(
+                    wrapped_ds,
+                    batch_size=1,
+                    sampler=sampler,
+                    num_workers=self.data_loader_cfg.val.num_workers,
+                    worker_init_fn=worker_init_fn,
+                    persistent_workers=self.get_persistent(self.data_loader_cfg.val),
+                )
+                val_loaders.append(loader)
+            self.val_loaders = val_loaders
+            return val_loaders
         else:
-            prob = None
-        print("val_dataloader function Datasets in validation:", [type(dataset).__name__ for dataset in datasets_ls])
-        sampler = MixedBatchSampler(datasets_ls, 
-                                    batch_size=self.data_loader_cfg.train.batch_size, 
-                                    num_context_views=dataset_cfg['view_sampler']['num_context_views'], 
-                                    world_size=world_size, 
-                                    rank=rank,
-                                    prob=prob,
-                                    generator=self.get_generator(self.data_loader_cfg.train))
-        sampler.set_epoch(0)
-        self.val_loader = DataLoader(
-            dataset,
-            batch_sampler=sampler,
-            num_workers=self.data_loader_cfg.val.num_workers,
-            generator=self.get_generator(self.data_loader_cfg.val),
-            worker_init_fn=worker_init_fn,
-            persistent_workers=self.get_persistent(self.data_loader_cfg.val),
-        )
-        if hasattr(self.val_loader, "dataset") and hasattr(self.val_loader.dataset, "set_epoch"):
-            print("Validation: Set Epoch in DataModule")
-            self.val_loader.dataset.set_epoch(0)
-        if hasattr(self.val_loader, "sampler") and hasattr(self.val_loader.sampler, "set_epoch"):
-            print("Validation: Set Epoch in DataModule")
-            self.val_loader.sampler.set_epoch(0)
-        return self.val_loader
+            # Single dataset val
+            dataset_key = next(iter(get_cfg()["dataset"]))
+            dataset_cfg = get_cfg()["dataset"][dataset_key]
+            context_num_views = dataset_cfg['view_sampler']['num_context_views']
+            sampler = MixedBatchSampler(datasets_ls,
+                                        batch_size=self.data_loader_cfg.train.batch_size,
+                                        num_context_views=context_num_views,
+                                        world_size=world_size,
+                                        rank=rank,
+                                        prob=None,
+                                        generator=self.get_generator(self.data_loader_cfg.train))
+            sampler.set_epoch(0)
+            self.val_loader = DataLoader(
+                dataset,
+                batch_sampler=sampler,
+                num_workers=self.data_loader_cfg.val.num_workers,
+                generator=self.generator,
+                worker_init_fn=worker_init_fn,
+                persistent_workers=self.get_persistent(self.data_loader_cfg.val),
+            )
+            if hasattr(self.val_loader, "sampler") and hasattr(self.val_loader.sampler, "set_epoch"):
+                self.val_loader.sampler.set_epoch(0)
+            return self.val_loader
 
     def test_dataloader(self):
         dataset = get_dataset(self.dataset_cfgs, "test", self.step_tracker, self.dataset_shim)

@@ -59,20 +59,20 @@ class LossDepthEdgeSmooth(Loss[LossDepthEdgeSmoothCfg, LossDepthEdgeSmoothCfgWra
         rgb = rearrange(rgb, "b v c h w -> (b v) c h w")
         depth = rearrange(depth, "b v h w -> (b v) 1 h w")
 
-        # Normalized inverse depth (disparity): near-sensitive, scale-invariant
-        # inv_depth = 1.0 / (depth + 1e-8) # loss 0.0007
-        # mean_inv_depth = inv_depth.mean(dim=(-2, -1), keepdim=True)
-        # norm_inv_depth = inv_depth / (mean_inv_depth + 1e-8)
-        # loss = compute_edge_smooth_loss(rgb.clamp(0, 1), norm_inv_depth)
+        # car_cam_mask: (B, V, 1, H, W) or (B, V, H, W) — 1=valid, 0=car region
+        car_cam_mask = batch["context"]["car_cam_mask"]
+        if car_cam_mask.dim() == 5 and car_cam_mask.shape[2] == 1:
+            car_cam_mask = car_cam_mask[:, :, 0]
+        car_cam_mask = rearrange(car_cam_mask, "b v h w -> (b v) 1 h w")
 
-        # # Alternative: normalized depth (preserves original gradient distribution)
-        mean_depth = depth.mean(dim=(-2, -1), keepdim=True) # loss 0.0009 
-        norm_depth = depth / (mean_depth + 1e-8) 
-        norm_depth = 1.0 / (norm_depth + 1e-8) 
-        loss = compute_edge_smooth_loss(rgb.clamp(0, 1), norm_depth)
-        
-        # Use inverse depth (disparity) for better gradient distribution
-        # inv_depth = 1.0 / (depth + 1e-8) # loss 0.00006
-        # loss = compute_edge_smooth_loss(rgb.clamp(0, 1), inv_depth)
-        
+        mean_depth = depth.mean(dim=(-2, -1), keepdim=True)
+        norm_depth = depth / (mean_depth + 1e-8)
+        norm_depth = 1.0 / (norm_depth + 1e-8)
+
+        # Mask out car regions before computing edge smooth loss
+        rgb = rgb.clamp(0, 1) * car_cam_mask
+        norm_depth = norm_depth * car_cam_mask
+
+        loss = compute_edge_smooth_loss(rgb, norm_depth)
+
         return self.cfg.weight * torch.nan_to_num(loss, nan=0.0, posinf=0.0, neginf=0.0)

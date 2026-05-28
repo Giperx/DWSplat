@@ -193,10 +193,16 @@ class ModelWrapper(LightningModule):
     def on_validation_epoch_start(self) -> None:
         print(f"Validation epoch start on rank {self.trainer.global_rank}")
         # our custom dataset and sampler has to have epoch set by calling set_epoch
-        if hasattr(self.trainer.datamodule.val_loader.dataset, "set_epoch"):
-            self.trainer.datamodule.val_loader.dataset.set_epoch(self.current_epoch)
-        if hasattr(self.trainer.datamodule.val_loader.sampler, "set_epoch"):
-            self.trainer.datamodule.val_loader.sampler.set_epoch(self.current_epoch)
+        if hasattr(self.trainer.datamodule, "val_loaders"):
+            for loader in self.trainer.datamodule.val_loaders:
+                if hasattr(loader, "sampler") and hasattr(loader.sampler, "set_epoch"):
+                    loader.sampler.set_epoch(self.current_epoch)
+        elif hasattr(self.trainer.datamodule, "val_loader"):
+            loader = self.trainer.datamodule.val_loader
+            if hasattr(loader.dataset, "set_epoch"):
+                loader.dataset.set_epoch(self.current_epoch)
+            if hasattr(loader.sampler, "set_epoch"):
+                loader.sampler.set_epoch(self.current_epoch)
 
     def _iter_loggers(self) -> list[Any]:
         if getattr(self, "loggers", None):

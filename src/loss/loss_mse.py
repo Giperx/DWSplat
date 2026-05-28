@@ -57,6 +57,11 @@ class LossMse(Loss[LossMseCfg, LossMseCfgWrapper]):
             mask = torch.ones_like(alpha, device=alpha.device).bool()
 
         # mask = mask.bool() & car_cam_mask.bool()
+        car_cam_mask = batch['context']['car_cam_mask']
+        # Dataset masks may be shaped as [B, V, 1, H, W]; squeeze channel dim.
+        if car_cam_mask.dim() == 5 and car_cam_mask.shape[2] == 1:
+            car_cam_mask = car_cam_mask[:, :, 0]    
+        mask = mask.bool() & car_cam_mask.bool()
         
         # Rearrange and mask predicted and ground truth images
         pred_img = prediction.color.permute(0, 1, 3, 4, 2)[mask] 

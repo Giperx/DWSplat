@@ -39,10 +39,10 @@ class LossOpacity(Loss[LossOpacityCfg, LossOpacityCfgWrapper]):
         # valid_mask = batch['context']['valid_mask'].float()
         valid_mask = torch.ones_like(alpha, device=alpha.device).bool()
         
-        # car_cam_mask = batch["context"]["car_cam_mask"]
-        # if car_cam_mask.dim() == 5 and car_cam_mask.shape[2] == 1:
-        #     car_cam_mask = car_cam_mask[:, :, 0]
-        # valid_mask = valid_mask & car_cam_mask.bool()
+        car_cam_mask = batch["context"]["car_cam_mask"]
+        if car_cam_mask.dim() == 5 and car_cam_mask.shape[2] == 1:
+            car_cam_mask = car_cam_mask[:, :, 0]
+        valid_mask = valid_mask & car_cam_mask.bool()
         
         mask_loss = F.mse_loss(alpha, valid_mask.float(), reduction='none').mean()
         # if self.cfg.type == "exp":

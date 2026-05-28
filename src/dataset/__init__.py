@@ -10,15 +10,19 @@ from .dataset_dl3dv import DatasetDL3DV, DatasetDL3DVCfgWrapper
 from .dataset_scannetpp import DatasetScannetpp, DatasetScannetppCfgWrapper
 from .dataset_co3d import DatasetCo3d, DatasetCo3dCfgWrapper
 from .dataset_nuscenes import DatasetNuScenes, DatasetNuScenesCfgWrapper
+from .dataset_lyft1224 import DatasetLyft1224, DatasetLyft1224CfgWrapper
+from .dataset_lyft1920 import DatasetLyft1920, DatasetLyft1920CfgWrapper
 
 DATASETS: dict[str, Dataset] = {
     "co3d": DatasetCo3d,
     "scannetpp": DatasetScannetpp,
     "dl3dv": DatasetDL3DV,
     "nuscenes": DatasetNuScenes,
+    "lyft1224": DatasetLyft1224,
+    "lyft1920": DatasetLyft1920,
 }
 
-DatasetCfgWrapper = DatasetDL3DVCfgWrapper | DatasetScannetppCfgWrapper | DatasetCo3dCfgWrapper | DatasetNuScenesCfgWrapper
+DatasetCfgWrapper = DatasetDL3DVCfgWrapper | DatasetScannetppCfgWrapper | DatasetCo3dCfgWrapper | DatasetNuScenesCfgWrapper | DatasetLyft1224CfgWrapper | DatasetLyft1920CfgWrapper
 
 class TestDatasetWarpper(Dataset):
     def __init__(self, dataset: Dataset):
@@ -61,8 +65,6 @@ def get_dataset(
 ) -> list[Dataset]:
     datasets = []
     if stage != "test":
-        if stage == "val":
-            cfgs = [cfgs[0]]
         for cfg in cfgs:
             (field,) = fields(type(cfg))
             cfg = getattr(cfg, field.name)

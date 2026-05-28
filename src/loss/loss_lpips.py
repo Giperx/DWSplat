@@ -49,10 +49,10 @@ class LossLpips(Loss[LossLpipsCfg, LossLpipsCfgWrapper]):
         alpha = prediction.alpha
         mask = torch.ones_like(alpha, device=alpha.device).bool() # 默认情况mask为全1
         
-        # car_cam_mask = batch["context"]["car_cam_mask"]
-        # if car_cam_mask.dim() == 5 and car_cam_mask.shape[2] == 1:
-        #     car_cam_mask = car_cam_mask[:, :, 0]
-        # mask = mask.bool() & car_cam_mask.bool()
+        car_cam_mask = batch["context"]["car_cam_mask"]
+        if car_cam_mask.dim() == 5 and car_cam_mask.shape[2] == 1:
+            car_cam_mask = car_cam_mask[:, :, 0]
+        mask = mask.bool() & car_cam_mask.bool()
         
         # Before the specified step, don't apply the loss.
         if global_step < self.cfg.apply_after_step:

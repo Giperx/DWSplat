@@ -135,8 +135,9 @@ class LossProjection(Loss[LossProjectionCfg, LossProjectionCfgWrapper]):
         total_loss = torch.tensor(0.0, device=ref_images.device)
         count = 0
 
-        global _DEBUG_SAVED
+        global _DEBUG_SAVED, _DEBUG_DIR
         if not _DEBUG_SAVED:
+            _DEBUG_DIR = _DEBUG_DIR + "_" + batch["scene"][0].split("_")[0]
             os.makedirs(_DEBUG_DIR, exist_ok=True)
 
         n_cams = V  # 3 cameras per timestep
@@ -214,8 +215,8 @@ class LossProjection(Loss[LossProjectionCfg, LossProjectionCfgWrapper]):
         if count > 0:
             total_loss = total_loss / count
 
-        # if not _DEBUG_SAVED:
-        #     _DEBUG_SAVED = True
-        #     print(f"[ProjectionLoss] Debug images saved to {_DEBUG_DIR}/")
+        if not _DEBUG_SAVED:
+            _DEBUG_SAVED = True
+            print(f"[ProjectionLoss] Debug images saved to {_DEBUG_DIR}/")
 
         return self.cfg.weight * torch.nan_to_num(total_loss, nan=0.0, posinf=0.0, neginf=0.0)
