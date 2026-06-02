@@ -98,9 +98,18 @@ class AnySplat(nn.Module, huggingface_hub.PyTorchModelHubMixin):
     @torch.no_grad()
     def inference(self,
         # context_image: torch.Tensor,
-        batch: BatchedExample
+        batch: BatchedExample,
+        use_delete_mask: bool = False
     ):
         self.encoder.distill = False
+        # Merge delete_mask into car_cam_mask (intersection: both white = keep)
+        if use_delete_mask and "delete_mask" in batch.get("context", {}):
+            delete_mask = batch["context"]["delete_mask"]
+            car_cam_mask = batch["context"].get("car_cam_mask")
+            if car_cam_mask is not None:
+                batch["context"]["car_cam_mask"] = car_cam_mask * delete_mask
+            else:
+                batch["context"]["car_cam_mask"] = delete_mask
         encoder_output = self.encoder(batch, global_step=1, visualization_dump=None)
         gaussians, pred_context_pose = encoder_output.gaussians, encoder_output.pred_context_pose
         return gaussians, pred_context_pose
